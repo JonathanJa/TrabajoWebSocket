@@ -1,7 +1,7 @@
 <?php
 
-test('returns a successful response', function () {
+test('redirects to the damas game', function () {
     $response = $this->get(route('home'));
 
-    $response->assertOk();
+    $response->assertRedirect('/damas');
 });

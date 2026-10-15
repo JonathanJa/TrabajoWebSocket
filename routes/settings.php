@@ -47,6 +47,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
 });
 
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::post('invitations/{invitation}/accept', [TeamInvitationController::class, 'accept'])
+        ->name('invitations.accept');
+
+    Route::delete('invitations/{invitation}/decline', [TeamInvitationController::class, 'decline'])
+        ->name('invitations.decline');
+});
+
 Route::get('.well-known/passkey-endpoints', function () {
     return response()->json([
         'enroll' => route('security.edit'),
