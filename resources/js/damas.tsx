@@ -4,6 +4,7 @@ import {
     BookOpen,
     Bot,
     Check,
+    ChevronUp,
     Copy,
     Crown,
     Flag,
@@ -20,6 +21,16 @@ import { transmitir } from './actions/App/Http/Controllers/DamasController';
 import { AI_PROFILES, profileById, type AiProfile } from './damas/ai/profiles';
 import { CASES, caseIndex } from './damas/campaign/cases';
 import {
+    MAX_LEVEL,
+    loadLadder,
+    nextProfile,
+    profileIndex,
+    recordOf,
+    registerLadderDuel,
+    saveLadder,
+    type LadderState,
+} from './damas/campaign/ladder';
+import {
     campaignStats,
     isUnlocked,
     loadProgress,
@@ -29,6 +40,13 @@ import {
 } from './damas/campaign/progress';
 import type { Move, Side } from './damas/engine/types';
 import {
+    duelOf,
+    loadDuels,
+    registerRivalDuel,
+    saveDuels,
+    type DuelMap,
+} from './damas/game/duels';
+import {
     DEFAULT_VARIANT,
     isVariantId,
     rulesFor,
@@ -36,7 +54,7 @@ import {
 } from './damas/engine/variants';
 import { isLegal, type MatchSnapshot } from './damas/game/matchState';
 import type { AcademyId } from './damas/game/academy';
-import { isMuted, setMuted } from './damas/game/sound';
+import { isMuted, playSound, setMuted } from './damas/game/sound';
 import {
     announceHumanTurn,
     isVoiceEnabled,
@@ -54,6 +72,19 @@ import {
     ThinkingRow,
 } from './damas/ui/Hud';
 import { Academy } from './damas/ui/Academy';
+import {
+    MesaHint,
+    MesaPlate,
+    type ChatLine,
+    type PeerInfo,
+    type Role,
+} from './damas/ui/Chat';
+import {
+    DuelRankPlate,
+    LadderPlate,
+    LadderRankPlate,
+    RemoteScorePlate,
+} from './damas/ui/Score';
 import { Header, Screen } from './damas/ui/Screen';
 import { Button, Chip, Plate, SegNav } from './damas/ui/primitives';
 import './echo';
@@ -204,6 +235,37 @@ const newPlayerId = (): string =>
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+const PLAYER_NAME_KEY = 'senal.damas.nombre.v1';
+const PLAYER_NAME_MAX = 18;
+
+const cleanPlayerName = (value: string): string =>
+    value
+        .replace(/[^\p{L}\p{N} ._-]/gu, '')
+        .replace(/\s+/g, ' ')
+        .trimStart()
+        .slice(0, PLAYER_NAME_MAX);
+
+const loadPlayerName = (): string => {
+    try {
+        return cleanPlayerName(
+            window.localStorage.getItem(PLAYER_NAME_KEY) ?? '',
+        );
+    } catch {
+        return '';
+    }
+};
+
+const savePlayerName = (value: string): void => {
+    try {
+        window.localStorage.setItem(PLAYER_NAME_KEY, value);
+    } catch {
+        // Sin almacenamiento local: el nombre solo dura la sesión.
+    }
+};
+
+const readName = (value: unknown): string =>
+    typeof value === 'string' ? cleanPlayerName(value) : '';
+
 const RemoteChannel = ({
     room,
     onMessage,
@@ -247,6 +309,8 @@ const VariantSelector = ({
     </Plate>
 );
 
+const ordinal = (index: number): string => String(index + 1).padStart(2, '0');
+
 const DamasApp = () => {
     const [page, setPage] = useState<Page>('home');
     const [pageBeforeAcademy, setPageBeforeAcademy] = useState<Page>('home');
@@ -258,24 +322,128 @@ const DamasApp = () => {
     const [humanSide, setHumanSide] = useState<Side>('operador');
     const [campaignCase, setCampaignCase] = useState<string | null>(null);
     const [progress, setProgress] = useState<ProgressMap>(() => loadProgress());
+    const [ladder, setLadder] = useState<LadderState>(() => loadLadder());
+    const [duels, setDuels] = useState<DuelMap>(() => loadDuels());
+    const [remoteScore, setRemoteScore] = useState<Record<Side, number>>({
+        operador: 0,
+        entidad: 0,
+    });
+    const [chatLines, setChatLines] = useState<ChatLine[]>([]);
+    const [peers, setPeers] = useState<Record<string, PeerInfo>>({});
+    const [nextLevel, setNextLevel] = useState<AiProfile | null>(null);
+    const [advanceIn, setAdvanceIn] = useState<number | null>(null);
     const [room, setRoom] = useState('');
     const [roomInput, setRoomInput] = useState('');
     const [roomRole, setRoomRole] = useState<RoomRole>(null);
     const [peerOnline, setPeerOnline] = useState(false);
     const [remoteSynced, setRemoteSynced] = useState(false);
     const [copyDone, setCopyDone] = useState(false);
+    const [isSpectator, setIsSpectator] = useState(false);
+    const [roomFull, setRoomFull] = useState(false);
+    const [playerName, setPlayerName] = useState(() => loadPlayerName());
+    const [rivalNames, setRivalNames] = useState<Partial<Record<Side, string>>>(
+        {},
+    );
+    const rivalNamesRef = useRef<Partial<Record<Side, string>>>({});
     const [muted, setMutedState] = useState(isMuted());
     const [voiceEnabled, setVoiceEnabledState] = useState(isVoiceEnabled());
     const [transportError, setTransportError] = useState('');
     const playerId = useRef(newPlayerId());
     const matchRef = useRef<MatchController | null>(null);
+    const greetedPeers = useRef<Set<string>>(new Set());
+    const startMatchRef = useRef<
+        | ((mode: MatchMode, selectedProfile: AiProfile, side: Side) => void)
+        | null
+    >(null);
     const recordedResult = useRef<string | null>(null);
+    const hostHasPlayerRef = useRef(false);
     const connectionStatus = useConnectionStatus();
     const profile = profileById(profileId);
+    const cleanName = cleanPlayerName(playerName);
+    const nameOf = (side: Side): string => {
+        if (!isSpectator && side === humanSide) {
+            return cleanName === '' ? 'TÚ' : cleanName.toUpperCase();
+        }
+
+        const stored = rivalNames[side];
+
+        if (stored !== undefined && stored !== '') {
+            return stored.toUpperCase();
+        }
+
+        return side === 'operador' ? 'JUGADOR CLARO' : 'JUGADOR OSCURO';
+    };
+    const rivalName = (): string => {
+        if (isSpectator) {
+            return 'MESA COMPLETA';
+        }
+
+        const stored =
+            humanSide === 'operador' ? rivalNames.entidad : rivalNames.operador;
+
+        return stored === undefined || stored === ''
+            ? 'SIN IDENTIFICAR'
+            : stored.toUpperCase();
+    };
+    const rememberRivalName = useCallback((side: Side, value: string) => {
+        if (value === '' || rivalNamesRef.current[side] === value) {
+            return;
+        }
+
+        rivalNamesRef.current = { ...rivalNamesRef.current, [side]: value };
+        setRivalNames(rivalNamesRef.current);
+    }, []);
+    const clearRivalNames = useCallback(() => {
+        rivalNamesRef.current = {};
+        setRivalNames({});
+    }, []);
+    /** Anota quién está en la sala (jugadores y espectadores). */
+    const notePeer = useCallback((emisor: string, name: string, role: Role) => {
+        if (emisor === '') {
+            return;
+        }
+
+        const clean = name.trim().toUpperCase();
+
+        setPeers((current) => {
+            const previous = current[emisor];
+
+            return {
+                ...current,
+                [emisor]: {
+                    name: clean === '' ? (previous?.name ?? 'CONTACTO') : clean,
+                    role,
+                    at: Date.now(),
+                },
+            };
+        });
+    }, []);
+    const dropPeer = useCallback((emisor: string) => {
+        setPeers((current) => {
+            if (!(emisor in current)) {
+                return current;
+            }
+
+            const next = { ...current };
+            delete next[emisor];
+
+            return next;
+        });
+    }, []);
+    const addChatLine = useCallback((line: ChatLine) => {
+        setChatLines((current) => [...current, line].slice(-80));
+    }, []);
     const remoteActive =
         (page === 'waiting' || page === 'match') &&
         matchMode === 'remote' &&
         room !== '';
+    const peerList = Object.values(peers);
+    const rivalLabel = isSpectator
+        ? ''
+        : ((humanSide === 'operador'
+              ? rivalNames.entidad
+              : rivalNames.operador) ?? '');
+    const duelHistory = duelOf(duels, rivalLabel);
 
     const transmit = useCallback(
         async (tipo: string, payload: Record<string, unknown> = {}) => {
@@ -322,6 +490,34 @@ const DamasApp = () => {
         [room],
     );
 
+    const sendChat = useCallback(
+        (text: string) => {
+            const clean = text.trim().slice(0, 160);
+
+            if (clean === '' || room === '') {
+                return;
+            }
+
+            const role: Role = isSpectator ? 'spectator' : humanSide;
+            const name = cleanName === '' ? 'ANÓNIMO' : cleanName.toUpperCase();
+
+            addChatLine({
+                id: `${playerId.current}-${Date.now()}`,
+                emisor: 'self',
+                name,
+                role,
+                text: clean,
+                at: Date.now(),
+            });
+            void transmit('chat', {
+                name: cleanName,
+                side: role,
+                text: clean,
+            });
+        },
+        [addChatLine, cleanName, humanSide, isSpectator, room, transmit],
+    );
+
     const onPlay = useCallback(
         (move: Move, snapshot: MatchSnapshot) => {
             if (matchMode === 'remote') {
@@ -340,6 +536,16 @@ const DamasApp = () => {
         onPlay,
     });
     matchRef.current = match;
+
+    // El progreso de la escalera y el historial de rivales viven en el
+    // dispositivo: el servidor no guarda estado.
+    useEffect(() => {
+        saveLadder(ladder);
+    }, [ladder]);
+
+    useEffect(() => {
+        saveDuels(duels);
+    }, [duels]);
 
     useEffect(() => {
         if (
@@ -378,26 +584,137 @@ const DamasApp = () => {
             const payload = message.payload ?? {};
 
             switch (message.tipo) {
-                case 'join':
-                    if (roomRole === 'host') {
-                        setPeerOnline(true);
-                        setRemoteSynced(false);
-                        setPage('match');
-                        void transmit('sync', { snapshot: game.snapshot });
+                case 'join': {
+                    if (roomRole !== 'host') {
+                        break;
                     }
-                    break;
-                case 'hello':
+                    const joinName = readName(payload.name);
+                    if (hostHasPlayerRef.current) {
+                        // La sala ya tiene dos jugadores: ofrecer espectador.
+                        // No se sobrescribe la identidad del invitado en juego.
+                        void transmit('welcome', {
+                            target: message.emisor,
+                            role: 'spectator',
+                            name: cleanName,
+                            rival: rivalNamesRef.current.entidad ?? '',
+                        });
+                        break;
+                    }
+                    rememberRivalName('entidad', joinName);
+                    notePeer(message.emisor, joinName, 'entidad');
+                    hostHasPlayerRef.current = true;
                     setPeerOnline(true);
+                    setRemoteSynced(false);
+                    setPage('match');
+                    void transmit('welcome', {
+                        target: message.emisor,
+                        role: 'player',
+                        name: cleanName,
+                        rival: joinName,
+                    });
+                    void transmit('sync', { snapshot: game.snapshot });
+                    break;
+                }
+                case 'welcome': {
+                    if (payload.target !== playerId.current) {
+                        break;
+                    }
+                    const hostName = readName(payload.name);
+                    const guestName = readName(payload.rival);
+                    if (hostName !== '' || guestName !== '') {
+                        rivalNamesRef.current = {
+                            ...rivalNamesRef.current,
+                            ...(hostName === '' ? {} : { operador: hostName }),
+                            ...(guestName === '' ? {} : { entidad: guestName }),
+                        };
+                        setRivalNames(rivalNamesRef.current);
+                    }
+                    if (payload.role === 'spectator') {
+                        setRoomFull(true);
+                        setPage('waiting');
+                        break;
+                    }
+                    notePeer(message.emisor, hostName, 'operador');
+                    setRoomFull(false);
+                    setIsSpectator(false);
+                    setPeerOnline(true);
+                    setPage('match');
+                    break;
+                }
+                case 'hello': {
+                    const who = payload.side;
+                    const helloName = readName(payload.name);
+                    if (isSide(who)) {
+                        rememberRivalName(who, helloName);
+                    }
+                    notePeer(
+                        message.emisor,
+                        helloName,
+                        isSide(who) ? who : 'spectator',
+                    );
+                    setPeerOnline(true);
+                    // Un solo saludo de vuelta por contacto: así la mesa se
+                    // llena de nombres (también con espectadores) sin bucles.
+                    if (
+                        room !== '' &&
+                        !greetedPeers.current.has(message.emisor)
+                    ) {
+                        greetedPeers.current.add(message.emisor);
+                        void transmit('hello', {
+                            side: isSpectator ? 'spectator' : humanSide,
+                            name: cleanName,
+                        });
+                    }
                     if (humanSide === 'operador') {
                         void transmit('sync', { snapshot: game.snapshot });
                     }
                     break;
+                }
+                case 'chat': {
+                    setPeerOnline(true);
+                    const text =
+                        typeof payload.text === 'string'
+                            ? payload.text.trim().slice(0, 160)
+                            : '';
+                    const who =
+                        payload.side === 'spectator'
+                            ? 'spectator'
+                            : isSide(payload.side)
+                              ? payload.side
+                              : 'spectator';
+                    const chatName = readName(payload.name);
+
+                    if (text === '') {
+                        break;
+                    }
+
+                    notePeer(message.emisor, chatName, who);
+                    addChatLine({
+                        id: `${message.emisor}-${Date.now()}`,
+                        emisor: message.emisor,
+                        name:
+                            chatName === ''
+                                ? 'CONTACTO'
+                                : chatName.toUpperCase(),
+                        role: who,
+                        text,
+                        at: Date.now(),
+                    });
+                    break;
+                }
                 case 'leave':
-                    setPeerOnline(false);
+                    dropPeer(message.emisor);
+                    if (roomRole === 'host' && payload.role !== 'spectator') {
+                        hostHasPlayerRef.current = false;
+                        setPeerOnline(false);
+                    }
                     break;
                 case 'sync-request':
                     setPeerOnline(true);
-                    if (humanSide === 'operador') {
+                    // Solo el anfitrión es autoridad del tablero; si responden
+                    // los demás (p. ej. un espectador) llegarían instantáneas
+                    // atrasadas y pisarían la partida en curso.
+                    if (roomRole === 'host') {
                         void transmit('sync', { snapshot: game.snapshot }).then(
                             (sent) => setRemoteSynced(sent),
                         );
@@ -407,9 +724,15 @@ const DamasApp = () => {
                     setPeerOnline(true);
                     const snapshot = decodeSnapshot(payload.snapshot);
                     if (snapshot !== null) {
-                        setVariantId(snapshot.variant);
-                        game.adoptSnapshot(snapshot);
-                        setRemoteSynced(true);
+                        // Nunca retroceder: una instantánea más vieja que la
+                        // partida local se descarta.
+                        if (snapshot.plies >= game.snapshot.plies) {
+                            setVariantId(snapshot.variant);
+                            game.adoptSnapshot(snapshot);
+                            setRemoteSynced(true);
+                        } else {
+                            void transmit('sync-request');
+                        }
                     }
                     break;
                 }
@@ -447,7 +770,18 @@ const DamasApp = () => {
                     break;
             }
         },
-        [humanSide, roomRole, transmit],
+        [
+            addChatLine,
+            cleanName,
+            dropPeer,
+            humanSide,
+            isSpectator,
+            notePeer,
+            rememberRivalName,
+            room,
+            roomRole,
+            transmit,
+        ],
     );
 
     useEffect(() => {
@@ -463,25 +797,25 @@ const DamasApp = () => {
         }
 
         if (page === 'waiting') {
-            if (roomRole === 'host') {
+            if (roomRole === 'host' || isSpectator || roomFull) {
                 return;
             }
 
+            // El invitado pide entrar; el anfitrión responde con 'welcome'
+            // (jugador o espectador) o no hay respuesta (sala inexistente).
             const timeout = window.setTimeout(() => {
-                void transmit('join', { variant: variantId }).then((joined) => {
-                    if (joined) {
-                        setPeerOnline(true);
-                        setPage('match');
-                    }
-                });
+                void transmit('join', { variant: variantId, name: cleanName });
             }, 200);
 
             return () => window.clearTimeout(timeout);
         }
 
         const timeout = window.setTimeout(() => {
-            void transmit('hello', { side: humanSide });
-            if (humanSide === 'entidad') {
+            void transmit('hello', {
+                side: isSpectator ? 'spectator' : humanSide,
+                name: cleanName,
+            });
+            if (humanSide === 'entidad' || isSpectator) {
                 void transmit('sync-request');
             }
         }, 200);
@@ -495,7 +829,32 @@ const DamasApp = () => {
         variantId,
         humanSide,
         transmit,
+        isSpectator,
+        roomFull,
+        cleanName,
     ]);
+
+    // Red de seguridad: si el anfitrión nunca responde (sala inexistente o
+    // cerrada), no dejamos al invitado colgado en la pantalla de espera.
+    useEffect(() => {
+        if (
+            !remoteActive ||
+            page !== 'waiting' ||
+            roomRole !== 'guest' ||
+            isSpectator ||
+            roomFull ||
+            connectionStatus !== 'connected'
+        ) {
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setPeerOnline(true);
+            setPage('match');
+        }, 6000);
+
+        return () => window.clearTimeout(timer);
+    }, [remoteActive, page, roomRole, isSpectator, roomFull, connectionStatus]);
 
     useEffect(() => {
         const result = match.snapshot.result;
@@ -505,12 +864,61 @@ const DamasApp = () => {
             return;
         }
 
-        const resultKey = `${matchMode}:${campaignCase ?? 'free'}:${match.snapshot.plies}:${result.reason}`;
+        // La clave no incluye el motivo: un abandono posterior al final de la
+        // partida no debe volver a contar el resultado.
+        const resultKey = `${matchMode}:${campaignCase ?? 'free'}:${match.snapshot.plies}`;
         if (recordedResult.current === resultKey) {
             return;
         }
 
         recordedResult.current = resultKey;
+
+        const winner = result.winner;
+        const humanWon = winner !== null && winner === humanSide;
+
+        // Aplauso: cierre entre personas o victoria propia contra la IA.
+        if (matchMode !== 'ai' || humanWon) {
+            playSound('applause');
+        }
+
+        if (matchMode === 'remote' && winner !== null) {
+            setRemoteScore((current) => ({
+                ...current,
+                [winner]: current[winner] + 1,
+            }));
+
+            if (!isSpectator) {
+                const rival =
+                    (humanSide === 'operador'
+                        ? rivalNamesRef.current.entidad
+                        : rivalNamesRef.current.operador) ?? '';
+
+                setDuels((current) =>
+                    registerRivalDuel(current, rival, humanWon),
+                );
+            }
+        }
+
+        if (matchMode === 'ai' && campaignCase === null) {
+            // Partida libre contra la IA: la escalera anota el duelo y, al
+            // ganar, ofrece subir al contacto siguiente.
+            if (winner !== null) {
+                setLadder((current) =>
+                    registerLadderDuel(current, profileId, humanWon),
+                );
+            }
+
+            if (humanWon) {
+                const following = nextProfile(profileId);
+
+                setNextLevel(following);
+                setAdvanceIn(following === null ? null : 10);
+            } else {
+                setNextLevel(null);
+                setAdvanceIn(null);
+            }
+        }
+
         if (page === 'match' && matchMode === 'ai' && campaignCase !== null) {
             setProgress((current) => {
                 let next = current;
@@ -528,12 +936,42 @@ const DamasApp = () => {
             });
         }
     }, [
-        match.snapshot.result,
+        campaignCase,
+        humanSide,
+        isSpectator,
         match.snapshot.plies,
+        match.snapshot.result,
         matchMode,
         page,
-        campaignCase,
+        profileId,
     ]);
+
+    // Cuenta atrás del ascenso: sube sola al contacto siguiente si el
+    // jugador no se queda revisando el informe.
+    useEffect(() => {
+        if (advanceIn === null) {
+            return;
+        }
+
+        if (nextLevel === null) {
+            setAdvanceIn(null);
+
+            return;
+        }
+
+        if (advanceIn <= 0) {
+            setAdvanceIn(null);
+            startMatchRef.current?.('ai', nextLevel, humanSide);
+
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setAdvanceIn((current) => (current === null ? null : current - 1));
+        }, 1000);
+
+        return () => window.clearTimeout(timer);
+    }, [advanceIn, humanSide, nextLevel]);
 
     const startMatch = (
         mode: MatchMode,
@@ -552,24 +990,81 @@ const DamasApp = () => {
         setPeerOnline(false);
         setRemoteSynced(mode !== 'remote' || side === 'operador');
         setTransportError('');
+        setIsSpectator(false);
+        setRoomFull(false);
+        hostHasPlayerRef.current = false;
         recordedResult.current = null;
+        setNextLevel(null);
+        setAdvanceIn(null);
         match.restart(selectedVariant);
         setPage('match');
+    };
+    startMatchRef.current = startMatch;
+
+    /** Reinicia el tablero y cancela cualquier ascenso pendiente. */
+    const restartMatch = () => {
+        setNextLevel(null);
+        setAdvanceIn(null);
+        match.restart();
+    };
+
+    /** Sube de inmediato al contacto siguiente. */
+    const advanceNow = () => {
+        if (nextLevel === null) {
+            return;
+        }
+
+        setAdvanceIn(null);
+        startMatch('ai', nextLevel, humanSide);
     };
 
     const leaveMatch = () => {
         if (matchMode === 'remote' && room !== '') {
-            void transmit('leave');
+            void transmit('leave', {
+                role: isSpectator ? 'spectator' : 'player',
+            });
         }
+        hostHasPlayerRef.current = false;
         setRoom('');
         setRoomRole(null);
         setPeerOnline(false);
+        setIsSpectator(false);
+        setRoomFull(false);
+        clearRivalNames();
+        setNextLevel(null);
+        setAdvanceIn(null);
+        setRemoteScore({ operador: 0, entidad: 0 });
+        setChatLines([]);
+        setPeers({});
+        greetedPeers.current = new Set();
         setPage('home');
     };
 
+    const enterAsSpectator = () => {
+        setIsSpectator(true);
+        setRoomFull(false);
+        setHumanSide('operador');
+        setPeerOnline(true);
+        setRemoteSynced(false);
+        recordedResult.current = null;
+        setRemoteScore({ operador: 0, entidad: 0 });
+        setChatLines([]);
+        setPeers({});
+        match.restart(variantId);
+        setPage('match');
+    };
+
     const createRoom = () => {
+        if (cleanName.length < 2) {
+            setTransportError(
+                'Escribe tu nombre (2 letras o más) para crear la sala.',
+            );
+            return;
+        }
+
         const code = makeRoomCode();
 
+        savePlayerName(cleanName);
         setMatchMode('remote');
         setHumanSide('operador');
         setRoom(code);
@@ -577,6 +1072,14 @@ const DamasApp = () => {
         setPeerOnline(false);
         setRemoteSynced(false);
         setTransportError('');
+        setIsSpectator(false);
+        setRoomFull(false);
+        clearRivalNames();
+        setRemoteScore({ operador: 0, entidad: 0 });
+        setChatLines([]);
+        setPeers({});
+        greetedPeers.current = new Set();
+        hostHasPlayerRef.current = false;
         match.restart(variantId);
         setPage('waiting');
     };
@@ -588,6 +1091,14 @@ const DamasApp = () => {
             return;
         }
 
+        if (cleanName.length < 2) {
+            setTransportError(
+                'Escribe tu nombre (2 letras o más) para entrar.',
+            );
+            return;
+        }
+
+        savePlayerName(cleanName);
         setMatchMode('remote');
         setHumanSide('entidad');
         setRoom(code);
@@ -595,6 +1106,13 @@ const DamasApp = () => {
         setPeerOnline(false);
         setRemoteSynced(false);
         setTransportError('');
+        setIsSpectator(false);
+        setRoomFull(false);
+        clearRivalNames();
+        setRemoteScore({ operador: 0, entidad: 0 });
+        setChatLines([]);
+        setPeers({});
+        greetedPeers.current = new Set();
         match.restart(variantId);
         setPage('waiting');
     };
@@ -633,6 +1151,7 @@ const DamasApp = () => {
 
     const stats = campaignStats(progress);
     const canUseBoard =
+        !isSpectator &&
         match.canInteract &&
         (matchMode !== 'remote' || (peerOnline && remoteSynced));
     const statusText =
@@ -640,18 +1159,22 @@ const DamasApp = () => {
             ? 'INFORME CERRADO'
             : match.thinking
               ? `${profile.callsign} CALCULANDO`
-              : matchMode === 'remote'
-                ? !peerOnline
-                    ? 'ESPERANDO AL SEGUNDO OPERADOR'
-                    : !remoteSynced
-                      ? 'SINCRONIZANDO TABLERO'
-                      : match.snapshot.sideToMove === humanSide
-                        ? 'TU TURNO'
-                        : 'TURNO DEL RIVAL'
-                : match.snapshot.sideToMove === humanSide ||
-                    matchMode === 'local'
-                  ? 'TU TURNO'
-                  : 'TURNO DE LA IA';
+              : isSpectator
+                ? !remoteSynced
+                    ? 'SINCRONIZANDO TABLERO'
+                    : 'MODO ESPECTADOR'
+                : matchMode === 'remote'
+                  ? !peerOnline
+                      ? 'ESPERANDO AL SEGUNDO OPERADOR'
+                      : !remoteSynced
+                        ? 'SINCRONIZANDO TABLERO'
+                        : match.snapshot.sideToMove === humanSide
+                          ? 'TU TURNO'
+                          : 'TURNO DEL RIVAL'
+                  : match.snapshot.sideToMove === humanSide ||
+                      matchMode === 'local'
+                    ? 'TU TURNO'
+                    : 'TURNO DE LA IA';
 
     return (
         <Screen>
@@ -940,23 +1463,38 @@ const DamasApp = () => {
                                     />
                                 </Plate>
                                 <div className="d-grid d-grid--bento">
-                                    {AI_PROFILES.map((item) => {
+                                    {AI_PROFILES.map((item, index) => {
                                         const Icon = item.icon;
                                         const selected = item.id === profileId;
+                                        const record = recordOf(
+                                            ladder,
+                                            item.id,
+                                        );
+                                        const cleared = record.wins > 0;
+                                        const current = index === ladder.level;
                                         return (
                                             <Plate
                                                 key={item.id}
-                                                label={`NIVEL ${item.rating}`}
+                                                label={`NIVEL ${ordinal(index)} · ${item.rating}`}
                                                 accent={selected}
                                             >
                                                 <div
                                                     className="d-stack"
                                                     style={{ gap: 9 }}
                                                 >
-                                                    <Icon
-                                                        size={22}
-                                                        className="d-acc"
-                                                    />
+                                                    <div className="d-row d-row--between">
+                                                        <Icon
+                                                            size={22}
+                                                            className="d-acc"
+                                                        />
+                                                        <Chip accent={cleared}>
+                                                            {cleared
+                                                                ? `${record.wins}V · ${record.losses}D`
+                                                                : current
+                                                                  ? 'TU NIVEL'
+                                                                  : 'SIN JUGAR'}
+                                                        </Chip>
+                                                    </div>
                                                     <h2
                                                         className="d-display"
                                                         style={{
@@ -1001,6 +1539,11 @@ const DamasApp = () => {
                                         );
                                     })}
                                 </div>
+                                <LadderRankPlate
+                                    ladder={ladder}
+                                    activeId={profileId}
+                                    onPick={(item) => setProfileId(item.id)}
+                                />
                             </>
                         ) : (
                             <Plate label="DUELO LOCAL">
@@ -1040,6 +1583,46 @@ const DamasApp = () => {
                             value={variantId}
                             onChange={setVariantId}
                         />
+                        <Plate label="IDENTIFICACIÓN" accent>
+                            <div className="d-stack" style={{ gap: 10 }}>
+                                <label
+                                    className="d-mono d-mute"
+                                    htmlFor="player-name"
+                                >
+                                    TU NOMBRE
+                                </label>
+                                <input
+                                    id="player-name"
+                                    className="d-input"
+                                    value={playerName}
+                                    maxLength={PLAYER_NAME_MAX}
+                                    autoComplete="nickname"
+                                    autoFocus
+                                    placeholder="EJ. ANA"
+                                    onChange={(event) =>
+                                        setPlayerName(
+                                            cleanPlayerName(event.target.value),
+                                        )
+                                    }
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter') {
+                                            event.preventDefault();
+                                            document
+                                                .getElementById('room-code')
+                                                ?.focus();
+                                        }
+                                    }}
+                                />
+                                <p
+                                    className="d-mute d-mono"
+                                    style={{ margin: 0, fontSize: 12 }}
+                                >
+                                    {cleanName.length < 2
+                                        ? 'ESCRIBE TU NOMBRE PARA JUGAR'
+                                        : `JUGARÁS COMO ${cleanName.toUpperCase()} · EL RIVAL VERÁ ESTE NOMBRE`}
+                                </p>
+                            </div>
+                        </Plate>
                         <div className="d-grid d-grid--split">
                             <Plate label="NUEVA SALA" accent>
                                 <div className="d-stack">
@@ -1047,6 +1630,7 @@ const DamasApp = () => {
                                     <Button
                                         icon={Users}
                                         variant="accent"
+                                        disabled={cleanName.length < 2}
                                         onClick={createRoom}
                                     >
                                         Crear sala
@@ -1075,23 +1659,48 @@ const DamasApp = () => {
                                                     .replace(/[^A-Z0-9]/g, ''),
                                             )
                                         }
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') {
+                                                event.preventDefault();
+                                                joinRoom();
+                                            }
+                                        }}
                                     />
                                     <Button
                                         icon={Link2}
-                                        disabled={roomInput.length < 3}
+                                        disabled={
+                                            roomInput.length < 3 ||
+                                            cleanName.length < 2
+                                        }
                                         onClick={joinRoom}
                                     >
                                         Entrar a la sala
                                     </Button>
+                                    <p
+                                        className="d-mute d-mono"
+                                        style={{ margin: 0, fontSize: 12 }}
+                                    >
+                                        PULSA ENTER PARA ENTRAR
+                                    </p>
                                 </div>
                             </Plate>
                         </div>
+                        <DuelRankPlate duels={duels} />
                         <Plate label="ESTADO DEL CANAL" sunken>
                             <div className="d-stack" style={{ gap: 8 }}>
                                 <StatusLine
                                     text={`WEBSOCKET · ${String(connectionStatus).toUpperCase()}`}
                                     accent={connectionStatus === 'connected'}
                                 />
+                                {cleanName.length < 2 ? null : (
+                                    <StatusLine
+                                        text={`IDENTIDAD · ${cleanName.toUpperCase()}`}
+                                        accent
+                                    />
+                                )}
+                                {transportError !== '' ? (
+                                    <StatusLine text={transportError} />
+                                ) : null}
                             </div>
                         </Plate>
                     </>
@@ -1101,58 +1710,108 @@ const DamasApp = () => {
                     <>
                         <Header
                             code={
-                                roomRole === 'host'
-                                    ? 'ANFITRIÓN · SALA PRIVADA'
-                                    : 'INVITADO · SALA PRIVADA'
+                                roomFull
+                                    ? 'SALA COMPLETA · ESPECTADOR'
+                                    : roomRole === 'host'
+                                      ? 'ANFITRIÓN · SALA PRIVADA'
+                                      : 'INVITADO · SALA PRIVADA'
                             }
                             title={
-                                roomRole === 'host'
-                                    ? 'SALA CREADA'
-                                    : 'CONECTANDO'
+                                roomFull
+                                    ? 'SALA LLENA'
+                                    : roomRole === 'host'
+                                      ? 'SALA CREADA'
+                                      : 'CONECTANDO'
                             }
                             meta={`${rulesFor(variantId).name.toUpperCase()} · ${String(connectionStatus).toUpperCase()}`}
                         />
-                        <Plate label="CÓDIGO DE INVITACIÓN" accent>
-                            <div className="d-stack" style={{ gap: 12 }}>
-                                <p
-                                    className="d-code"
-                                    aria-label={`Código ${room}`}
-                                    style={{ margin: 0 }}
-                                >
-                                    {room}
-                                </p>
-                                <div className="d-row d-row--between">
-                                    <StatusLine
-                                        text={
-                                            roomRole === 'host'
-                                                ? peerOnline
-                                                    ? 'JUGADOR ENCONTRADO · PREPARANDO TABLERO'
-                                                    : 'ESPERANDO AL SEGUNDO JUGADOR'
-                                                : remoteSynced
-                                                  ? 'SALA SINCRONIZADA'
-                                                  : 'UNIÉNDOTE A LA SALA'
-                                        }
-                                        accent={peerOnline || remoteSynced}
-                                    />
-                                    <Button
-                                        icon={copyDone ? Check : Copy}
-                                        onClick={() => void copyRoom()}
+                        {roomFull ? (
+                            <Plate label="SALA COMPLETA" accent>
+                                <div className="d-stack" style={{ gap: 12 }}>
+                                    <h2
+                                        className="d-display"
+                                        style={{ margin: 0, fontSize: 18 }}
                                     >
-                                        {copyDone ? 'Copiado' : 'Copiar código'}
-                                    </Button>
+                                        YA HAY DOS JUGADORES
+                                    </h2>
+                                    <p className="d-mute" style={{ margin: 0 }}>
+                                        La sala {room} ya tiene a sus dos
+                                        operadores en juego. ¿Entras como
+                                        espectador
+                                        {cleanName === ''
+                                            ? ''
+                                            : `, ${cleanName.toUpperCase()},`}{' '}
+                                        para mirar la partida sin mover piezas?
+                                    </p>
+                                    <div className="d-row">
+                                        <Button
+                                            icon={Users}
+                                            variant="accent"
+                                            onClick={enterAsSpectator}
+                                        >
+                                            Entrar como espectador
+                                        </Button>
+                                        <Button
+                                            icon={ArrowLeft}
+                                            variant="ghost"
+                                            onClick={leaveMatch}
+                                        >
+                                            No, volver
+                                        </Button>
+                                    </div>
                                 </div>
-                                {transportError !== '' ? (
-                                    <StatusLine text={transportError} />
-                                ) : null}
-                            </div>
-                        </Plate>
-                        <Button
-                            icon={ArrowLeft}
-                            variant="ghost"
-                            onClick={leaveMatch}
-                        >
-                            Cancelar y volver
-                        </Button>
+                            </Plate>
+                        ) : (
+                            <Plate label="CÓDIGO DE INVITACIÓN" accent>
+                                <div className="d-stack" style={{ gap: 12 }}>
+                                    <p
+                                        className="d-code"
+                                        aria-label={`Código ${room}`}
+                                        style={{ margin: 0 }}
+                                    >
+                                        {room}
+                                    </p>
+                                    <div className="d-row d-row--between">
+                                        <StatusLine
+                                            text={
+                                                roomRole === 'host'
+                                                    ? peerOnline
+                                                        ? `JUGADOR ENCONTRADO · ${nameOf('entidad')} · PREPARANDO TABLERO`
+                                                        : `ESPERANDO AL SEGUNDO JUGADOR · TÚ: ${nameOf('operador')}`
+                                                    : remoteSynced
+                                                      ? `SALA SINCRONIZADA · ANFITRIÓN: ${nameOf('operador')}`
+                                                      : `UNIÉNDOTE A LA SALA · TÚ: ${nameOf('entidad')}`
+                                            }
+                                            accent={peerOnline || remoteSynced}
+                                        />
+                                        <Button
+                                            icon={copyDone ? Check : Copy}
+                                            onClick={() => void copyRoom()}
+                                        >
+                                            {copyDone
+                                                ? 'Copiado'
+                                                : 'Copiar código'}
+                                        </Button>
+                                    </div>
+                                    <MesaHint peers={peerList} />
+                                    {connectionStatus === 'failed' ? (
+                                        <StatusLine text="SIN CONEXIÓN EN VIVO. Si usas un túnel (cloudflared), apúntalo al proxy de multijugador y no al servidor web: ejecuta «npm run proxy» y crea el túnel hacia http://localhost:8100" />
+                                    ) : null}
+                                    {transportError !== '' ? (
+                                        <StatusLine text={transportError} />
+                                    ) : null}
+                                </div>
+                            </Plate>
+                        )}
+                        {roomFull ? null : (
+                            <Button
+                                icon={ArrowLeft}
+                                variant="ghost"
+                                onClick={leaveMatch}
+                            >
+                                Cancelar y volver
+                            </Button>
+                        )}
                     </>
                 ) : null}
 
@@ -1171,7 +1830,7 @@ const DamasApp = () => {
                                     ? 'CONTACTO ACTIVO'
                                     : 'INFORME CERRADO'
                             }
-                            meta={`${match.snapshot.plies} JUGADAS · ${matchMode === 'remote' ? 'MULTIJUGADOR' : matchMode === 'local' ? 'DOS JUGADORES' : `NIVEL ${profile.rating}`} · ${rulesFor(match.snapshot.variant).name.toUpperCase()}`}
+                            meta={`${match.snapshot.plies} JUGADAS · ${matchMode === 'remote' ? 'MULTIJUGADOR' : matchMode === 'local' ? 'DOS JUGADORES' : `NIVEL ${ordinal(profileIndex(profileId))} · ${profile.rating}`} · ${rulesFor(match.snapshot.variant).name.toUpperCase()}`}
                             right={
                                 <div className="d-row">
                                     {matchMode === 'remote' ? (
@@ -1197,10 +1856,14 @@ const DamasApp = () => {
                             }
                         />
                         {matchMode === 'remote' ? (
-                            <Plate label="ESTADO DE TRANSMISIÓN" sunken>
+                            <Plate
+                                label="ESTADO DE TRANSMISIÓN"
+                                sunken
+                                className="d-arena__link"
+                            >
                                 <div className="d-row d-row--between">
                                     <StatusLine
-                                        text={`${String(connectionStatus).toUpperCase()} · ${peerOnline ? 'RIVAL DETECTADO' : 'ESPERANDO RIVAL'}`}
+                                        text={`${String(connectionStatus).toUpperCase()} · ${peerOnline ? `RIVAL · ${rivalName()}` : 'ESPERANDO RIVAL'}`}
                                         accent={
                                             peerOnline &&
                                             connectionStatus === 'connected'
@@ -1217,14 +1880,20 @@ const DamasApp = () => {
                                 </div>
                             </Plate>
                         ) : null}
-                        <div className="d-grid d-grid--split">
-                            <section className="d-stack" style={{ gap: 10 }}>
+                        <div
+                            className={`d-grid d-grid--split d-arena ${
+                                matchMode === 'remote' ? 'd-arena--link' : ''
+                            }`}
+                        >
+                            <section
+                                className="d-stack d-arena__board"
+                                style={{ gap: 10 }}
+                            >
                                 <SidePlate
                                     side="entidad"
                                     label={
-                                        matchMode === 'remote' &&
-                                        humanSide === 'entidad'
-                                            ? 'TÚ · OSCURO'
+                                        matchMode === 'remote'
+                                            ? `${nameOf('entidad')} · OSCURO`
                                             : matchMode === 'local'
                                               ? 'JUGADOR 2 · OSCURO'
                                               : 'SEÑAL · OSCURO'
@@ -1250,6 +1919,12 @@ const DamasApp = () => {
                                     onSquare={match.onSquare}
                                     interactive={canUseBoard}
                                     variant={match.snapshot.variant}
+                                    mustMove={
+                                        canUseBoard ? match.mustMove : undefined
+                                    }
+                                    rejected={
+                                        canUseBoard ? match.rejected : null
+                                    }
                                     flipped={
                                         matchMode === 'remote' &&
                                         humanSide === 'entidad'
@@ -1258,9 +1933,8 @@ const DamasApp = () => {
                                 <SidePlate
                                     side="operador"
                                     label={
-                                        matchMode === 'remote' &&
-                                        humanSide === 'operador'
-                                            ? 'TÚ · CLARO'
+                                        matchMode === 'remote'
+                                            ? `${nameOf('operador')} · CLARO`
                                             : matchMode === 'local'
                                               ? 'JUGADOR 1 · CLARO'
                                               : 'OPERADOR · CLARO'
@@ -1278,13 +1952,23 @@ const DamasApp = () => {
                                     snapshot={match.snapshot}
                                 />
                             </section>
-                            <aside className="d-stack">
-                                <Plate label="ESTADO DE PARTIDA" accent>
+                            <aside className="d-stack d-arena__side">
+                                <Plate
+                                    label="ESTADO DE PARTIDA"
+                                    accent
+                                    className="d-arena__status"
+                                >
                                     <div
                                         className="d-stack"
                                         style={{ gap: 10 }}
                                     >
                                         <StatusLine text={statusText} accent />
+                                        {match.mustMove.size > 0 ? (
+                                            <StatusLine
+                                                text="SEÑAL RECHAZADA · MOVER LA FICHA MARCADA"
+                                                accent
+                                            />
+                                        ) : null}
                                         {match.thinking ? (
                                             <ThinkingRow
                                                 label={`${profile.callsign} ANALIZA EL CAMPO`}
@@ -1325,31 +2009,139 @@ const DamasApp = () => {
                                                         ).detail
                                                     }
                                                 </p>
-                                                {matchMode === 'remote' ? (
-                                                    <Button
-                                                        icon={RotateCcw}
-                                                        onClick={() => {
-                                                            void transmit(
-                                                                'rematch',
-                                                            );
-                                                            match.restart();
-                                                        }}
+                                                {nextLevel !== null ? (
+                                                    <div
+                                                        className="d-stack"
+                                                        style={{ gap: 8 }}
                                                     >
-                                                        Nueva partida
-                                                    </Button>
+                                                        <StatusLine
+                                                            text={`NIVEL ${ordinal(profileIndex(profileId))} SUPERADO · PRÓXIMO CONTACTO: ${nextLevel.callsign} (${nextLevel.rating})`}
+                                                            accent
+                                                        />
+                                                        <Button
+                                                            icon={ChevronUp}
+                                                            variant="accent"
+                                                            onClick={advanceNow}
+                                                        >
+                                                            Subir al nivel{' '}
+                                                            {ordinal(
+                                                                profileIndex(
+                                                                    nextLevel.id,
+                                                                ),
+                                                            )}
+                                                        </Button>
+                                                        {advanceIn === null ? (
+                                                            <StatusLine text="ASCENSO EN PAUSA · REINICIA PARA SEGUIR EN ESTE NIVEL" />
+                                                        ) : (
+                                                            <>
+                                                                <StatusLine
+                                                                    text={`ASCENSO AUTOMÁTICO EN ${advanceIn} S`}
+                                                                />
+                                                                <Button
+                                                                    icon={
+                                                                        ArrowLeft
+                                                                    }
+                                                                    variant="ghost"
+                                                                    onClick={() =>
+                                                                        setAdvanceIn(
+                                                                            null,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    Quedarme en
+                                                                    el informe
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                ) : matchMode === 'remote' ? (
+                                                    isSpectator ? null : (
+                                                        <Button
+                                                            icon={RotateCcw}
+                                                            onClick={() => {
+                                                                void transmit(
+                                                                    'rematch',
+                                                                );
+                                                                restartMatch();
+                                                            }}
+                                                        >
+                                                            Nueva partida
+                                                        </Button>
+                                                    )
                                                 ) : (
-                                                    <Button
-                                                        icon={RotateCcw}
-                                                        variant="accent"
-                                                        onClick={match.restart}
+                                                    <div
+                                                        className="d-stack"
+                                                        style={{ gap: 8 }}
                                                     >
-                                                        Jugar de nuevo
-                                                    </Button>
+                                                        {matchMode === 'ai' &&
+                                                        campaignCase === null &&
+                                                        match.snapshot.result
+                                                            .winner ===
+                                                            humanSide &&
+                                                        ladder.level >=
+                                                            MAX_LEVEL ? (
+                                                            <StatusLine
+                                                                text={`ESCALERA COMPLETA · SUPERASTE LOS ${AI_PROFILES.length} CONTACTOS`}
+                                                                accent
+                                                            />
+                                                        ) : null}
+                                                        <Button
+                                                            icon={RotateCcw}
+                                                            variant="accent"
+                                                            onClick={
+                                                                restartMatch
+                                                            }
+                                                        >
+                                                            Jugar de nuevo
+                                                        </Button>
+                                                    </div>
                                                 )}
                                             </div>
                                         ) : null}
                                     </div>
                                 </Plate>
+                                {matchMode === 'remote' ? (
+                                    <div className="d-arena__score">
+                                        <RemoteScorePlate
+                                            names={{
+                                                operador: nameOf('operador'),
+                                                entidad: nameOf('entidad'),
+                                            }}
+                                            score={remoteScore}
+                                            history={duelHistory}
+                                            humanSide={humanSide}
+                                            round={
+                                                remoteScore.operador +
+                                                remoteScore.entidad +
+                                                1
+                                            }
+                                            rivalOnline={peerOnline}
+                                        />
+                                    </div>
+                                ) : matchMode === 'ai' &&
+                                  campaignCase === null ? (
+                                    <div className="d-arena__score">
+                                        <LadderPlate
+                                            profile={profile}
+                                            ladder={ladder}
+                                        />
+                                    </div>
+                                ) : null}
+                                {matchMode === 'remote' ? (
+                                    <div className="d-arena__mesa">
+                                        <MesaPlate
+                                            peers={peerList}
+                                            selfName={cleanName.toUpperCase()}
+                                            selfRole={
+                                                isSpectator
+                                                    ? 'spectator'
+                                                    : humanSide
+                                            }
+                                            lines={chatLines}
+                                            onSend={sendChat}
+                                        />
+                                    </div>
+                                ) : null}
                                 <MoveLog
                                     entries={match.snapshot.log}
                                     viewer={humanSide}
@@ -1361,7 +2153,7 @@ const DamasApp = () => {
                                         if (matchMode === 'remote') {
                                             void transmit('rematch');
                                         }
-                                        match.restart();
+                                        restartMatch();
                                     }}
                                     onSurrender={() => {
                                         if (matchMode === 'remote') {
@@ -1378,6 +2170,7 @@ const DamasApp = () => {
                                     onToggleVoice={toggleVoice}
                                     showVoice={matchMode === 'ai'}
                                     showUndo={matchMode !== 'remote'}
+                                    spectator={isSpectator}
                                 />
                             </aside>
                         </div>

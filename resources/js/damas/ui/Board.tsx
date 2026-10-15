@@ -14,6 +14,10 @@ interface BoardProps {
     interactive: boolean;
     variant?: VariantId;
     flipped?: boolean;
+    /** Fichas resaltadas por corrección: son las que sí pueden moverse. */
+    mustMove?: Set<number>;
+    /** Ficha rechazada (temblor) y contador para reiniciar el aviso. */
+    rejected?: { index: number; pulse: number } | null;
 }
 
 const toDisplay = (index: number, flipped: boolean, size: number): number =>
@@ -56,6 +60,8 @@ export const Board = ({
     interactive,
     variant = DEFAULT_VARIANT,
     flipped = false,
+    mustMove,
+    rejected = null,
 }: BoardProps) => {
     const size = rulesFor(variant).boardSize;
     const playablePattern = rulesFor(variant).playable;
@@ -108,6 +114,7 @@ export const Board = ({
                         lastMove !== null &&
                         (lastMove.from === index || lastMove.to === index);
                     const isCapturable = movable.has(index);
+                    const isMust = mustMove?.has(index) === true;
 
                     return (
                         <button
@@ -120,6 +127,7 @@ export const Board = ({
                                 isTarget ? 'd-sq--dest' : '',
                                 isLast ? 'd-sq--last' : '',
                                 isCapturable ? 'd-sq--capturable' : '',
+                                isMust ? 'd-sq--must' : '',
                             ]
                                 .filter((value) => value !== '')
                                 .join(' ')}
@@ -174,11 +182,27 @@ export const Board = ({
 
                     const square = toDisplay(index, flipped, size);
                     const beaten = captured.has(index);
+                    const isMust = mustMove?.has(index) === true;
+                    const rejection =
+                        rejected !== null && rejected.index === index
+                            ? rejected.pulse
+                            : null;
 
                     return (
                         <div
-                            key={index}
-                            className={`d-piece ${beaten ? 'd-piece--beat' : ''}`}
+                            key={
+                                rejection === null
+                                    ? index
+                                    : `${index}-r${rejection}`
+                            }
+                            className={[
+                                'd-piece',
+                                beaten ? 'd-piece--beat' : '',
+                                isMust ? 'd-piece--must' : '',
+                                rejection === null ? '' : 'd-piece--rejected',
+                            ]
+                                .filter((value) => value !== '')
+                                .join(' ')}
                             style={{
                                 left: `${colOf(square, size) * cellPercent}%`,
                                 top: `${rowOf(square, size) * cellPercent}%`,

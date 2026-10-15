@@ -123,7 +123,10 @@ export const advance = (state: MatchSnapshot, move: Move): MatchSnapshot => {
 };
 
 /** Abandono: gana el bando contrario al que corta la transmisión. */
-export const resign = (state: MatchSnapshot, side: Side): MatchSnapshot => ({
-    ...state,
-    result: { winner: opposite(side), reason: 'abandono' },
-});
+export const resign = (state: MatchSnapshot, side: Side): MatchSnapshot =>
+    state.result === null
+        ? {
+              ...state,
+              result: { winner: opposite(side), reason: 'abandono' },
+          }
+        : state;

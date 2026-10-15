@@ -21,6 +21,12 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Trust the reverse proxy (e.g. Cloudflare Tunnel) so the real scheme,
+        // host and client IP are detected. Without this, Laravel thinks an
+        // HTTPS request is plain HTTP and generates http:// asset URLs, which
+        // browsers block as mixed content.
+        $middleware->trustProxies(at: '*');
+
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
         $middleware->web(append: [

@@ -40,7 +40,9 @@ export const Button = ({
         aria-label={ariaLabel}
     >
         {Icon === undefined ? null : <Icon size={16} strokeWidth={2.2} />}
-        {children === undefined || children === null ? null : <span>{children}</span>}
+        {children === undefined || children === null ? null : (
+            <span>{children}</span>
+        )}
     </button>
 );
 
@@ -79,7 +81,13 @@ interface PlateProps {
     className?: string;
 }
 
-export const Plate = ({ children, label, accent, sunken, className }: PlateProps) => (
+export const Plate = ({
+    children,
+    label,
+    accent,
+    sunken,
+    className,
+}: PlateProps) => (
     <section
         className={`d-plate ${accent === true ? 'd-plate--acc' : ''} ${
             sunken === true ? 'd-plate--sunken' : ''
@@ -90,11 +98,25 @@ export const Plate = ({ children, label, accent, sunken, className }: PlateProps
     </section>
 );
 
-export const Chip = ({ children, accent }: { children: ReactNode; accent?: boolean }) => (
-    <span className={`d-chip ${accent === true ? 'd-chip--acc' : ''}`}>{children}</span>
+export const Chip = ({
+    children,
+    accent,
+}: {
+    children: ReactNode;
+    accent?: boolean;
+}) => (
+    <span className={`d-chip ${accent === true ? 'd-chip--acc' : ''}`}>
+        {children}
+    </span>
 );
 
-export const Bar = ({ value, animate }: { value: number; animate?: boolean }) => {
+export const Bar = ({
+    value,
+    animate,
+}: {
+    value: number;
+    animate?: boolean;
+}) => {
     const clamped = Math.max(0, Math.min(1, value));
 
     return (
@@ -144,7 +166,9 @@ export const SegNav = <T extends string>({
                     aria-selected={option.value === value}
                     onClick={() => onChange(option.value)}
                 >
-                    {Icon === undefined ? null : <Icon size={14} strokeWidth={2.4} />}
+                    {Icon === undefined ? null : (
+                        <Icon size={14} strokeWidth={2.4} />
+                    )}
                     {option.label}
                 </button>
             );

@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Events\RemoteStyleUpdate;
+use Illuminate\Http\Request;
 
 class RemoteStyleController extends Controller
 {
@@ -11,10 +11,12 @@ class RemoteStyleController extends Controller
     {
         return view('emisor');
     }
+
     public function receptor()
     {
         return view('receptor');
     }
+
     public function emitir(Request $request)
     {
         $data = $request->validate([
@@ -25,6 +27,7 @@ class RemoteStyleController extends Controller
             $data['newText'],
             $data['newStyle'] ?? ''
         ));
+
         return back()->with('ok', 'Mensaje emitido correctamente.');
     }
 }

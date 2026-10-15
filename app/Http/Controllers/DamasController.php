@@ -15,6 +15,7 @@ class DamasController extends Controller
      */
     private const TIPOS = [
         'join',
+        'welcome',
         'leave',
         'hello',
         'sync',

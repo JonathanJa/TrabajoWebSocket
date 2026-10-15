@@ -58,9 +58,13 @@ const readStorage = (): ProgressMap => {
             if (record !== undefined) {
                 base[caseFile.id] = {
                     cleared: record.cleared === true,
-                    attempts: Number.isFinite(record.attempts) ? record.attempts : 0,
+                    attempts: Number.isFinite(record.attempts)
+                        ? record.attempts
+                        : 0,
                     bestPlies:
-                        typeof record.bestPlies === 'number' ? record.bestPlies : null,
+                        typeof record.bestPlies === 'number'
+                            ? record.bestPlies
+                            : null,
                 };
             }
         }
@@ -87,7 +91,10 @@ export const loadProgress = (): ProgressMap => readStorage();
 
 export const saveProgress = (map: ProgressMap): void => writeStorage(map);
 
-export const registerAttempt = (map: ProgressMap, caseId: string): ProgressMap => {
+export const registerAttempt = (
+    map: ProgressMap,
+    caseId: string,
+): ProgressMap => {
     const current = map[caseId] ?? emptyRecord();
     const next: ProgressMap = {
         ...map,

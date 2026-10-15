@@ -36,6 +36,15 @@ export const sleep = (ms: number): Promise<void> =>
 /** Espera a que el navegador pinte: necesaria para que la transición arranque. */
 export const nextPaint = (): Promise<void> =>
     new Promise((resolve) => {
+        // En una pestaña en segundo plano (o app minimizada en el móvil) el
+        // navegador no ejecuta requestAnimationFrame: si esperásemos a él, la
+        // jugada del rival se quedaría a medias. Ahí basta con ceder el turno.
+        if (document.hidden) {
+            window.setTimeout(resolve, 0);
+
+            return;
+        }
+
         window.requestAnimationFrame(() => {
             window.requestAnimationFrame(() => resolve());
         });

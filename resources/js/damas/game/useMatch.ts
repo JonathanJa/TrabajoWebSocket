@@ -43,6 +43,10 @@ export interface MatchController {
     targets: Map<number, Move>;
     /** Casillas con piezas que pueden moverse ahora. */
     selectable: Set<number>;
+    /** Corrección activa: fichas que sí pueden moverse tras un intento inválido. */
+    mustMove: Set<number>;
+    /** Ficha rechazada (temblor) con contador para reiniciar el aviso. */
+    rejected: { index: number; pulse: number } | null;
     canInteract: boolean;
     canUndo: boolean;
     isHumanTurn: boolean;
@@ -57,6 +61,9 @@ export interface MatchController {
 }
 
 const HISTORY_LIMIT = 40;
+
+/** Conjunto vacío estable: evita recrear el Set en cada render. */
+const NO_MUST: Set<number> = new Set();
 
 export const useMatch = (options: MatchOptions): MatchController => {
     const {
@@ -74,7 +81,13 @@ export const useMatch = (options: MatchOptions): MatchController => {
     const [animation, setAnimation] = useState<AnimationFrame | null>(null);
     const [thinking, setThinking] = useState(false);
     const [running, setRunning] = useState(false);
+    const [mustAlert, setMustAlert] = useState(false);
+    const [rejected, setRejected] = useState<{
+        index: number;
+        pulse: number;
+    } | null>(null);
 
+    const pulsesRef = useRef(0);
     const historyRef = useRef<MatchSnapshot[]>([]);
     const runRef = useRef(0);
     const aiScheduledRef = useRef(false);
@@ -128,6 +141,9 @@ export const useMatch = (options: MatchOptions): MatchController => {
         !running &&
         animation === null &&
         isHumanTurn;
+
+    // Tras un intento inválido se resaltan las fichas que sí pueden moverse.
+    const mustMove = mustAlert && canInteract ? selectable : NO_MUST;
 
     const runMove = useCallback(
         async (base: MatchSnapshot, move: Move, notify = true) => {
@@ -280,6 +296,12 @@ export const useMatch = (options: MatchOptions): MatchController => {
         }, 60);
     }, [profile, snapshot, humanSide, running, animation, think]);
 
+    // La corrección se apaga sola cuando cambia la posición (jugada, reinicio o sincronización).
+    useEffect(() => {
+        setMustAlert(false);
+        setRejected(null);
+    }, [snapshot]);
+
     const onSquare = useCallback(
         (index: number) => {
             if (!canInteract) {
@@ -289,12 +311,16 @@ export const useMatch = (options: MatchOptions): MatchController => {
             const target = targets.get(index);
 
             if (target !== undefined) {
+                setMustAlert(false);
+                setRejected(null);
                 void runMove(snapshot, target);
 
                 return;
             }
 
             if (selectable.has(index)) {
+                setMustAlert(false);
+                setRejected(null);
                 setSelection(index);
                 playSound('select');
 
@@ -302,6 +328,16 @@ export const useMatch = (options: MatchOptions): MatchController => {
             }
 
             setSelection(null);
+
+            // Tocó una ficha propia que no puede moverse: se marca cuál sí.
+            const piece = snapshot.board[index];
+
+            if (piece !== null && piece.side === snapshot.sideToMove) {
+                pulsesRef.current += 1;
+                setMustAlert(true);
+                setRejected({ index, pulse: pulsesRef.current });
+                playSound('invalid');
+            }
         },
         [canInteract, targets, selectable, runMove, snapshot],
     );
@@ -416,6 +452,8 @@ export const useMatch = (options: MatchOptions): MatchController => {
         thinking,
         targets,
         selectable,
+        mustMove,
+        rejected,
         canInteract,
         canUndo: !remote && historyRef.current.length > 0,
         isHumanTurn,

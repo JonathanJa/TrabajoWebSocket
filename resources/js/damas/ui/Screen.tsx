@@ -21,15 +21,27 @@ interface HeaderProps {
 }
 
 export const Header = ({ code, title, meta, right }: HeaderProps) => (
-    <header className="d-row d-row--between" style={{ alignItems: 'flex-end' }}>
-        <div className="d-stack" style={{ gap: 6 }}>
-            <p className="d-mono d-acc d-glitch" style={{ margin: 0 }}>
+    <header
+        className="d-row d-row--between d-head"
+        style={{ alignItems: 'flex-end' }}
+    >
+        <div className="d-stack d-head__stack" style={{ gap: 6 }}>
+            <p
+                className="d-mono d-acc d-glitch d-head__code"
+                style={{ margin: 0 }}
+            >
                 {code}
             </p>
-            <h1 className="d-display" style={{ fontSize: 'clamp(26px,7vw,40px)', margin: 0 }}>
+            <h1
+                className="d-display d-head__title"
+                style={{
+                    fontSize: 'var(--d-title, clamp(26px,7vw,40px))',
+                    margin: 0,
+                }}
+            >
                 {title}
             </h1>
-            <p className="d-mono d-mute" style={{ margin: 0 }}>
+            <p className="d-mono d-mute d-head__meta" style={{ margin: 0 }}>
                 {meta}
             </p>
         </div>

@@ -42,7 +42,11 @@ export const orderMoves = (
         .sort((a, b) => b.score - a.score)
         .map((entry) => entry.move);
 
-export const bumpHistory = (history: HistoryTable, move: Move, depth: number): void => {
+export const bumpHistory = (
+    history: HistoryTable,
+    move: Move,
+    depth: number,
+): void => {
     const key = historyKey(move);
     history.set(key, (history.get(key) ?? 0) + depth * depth);
 };

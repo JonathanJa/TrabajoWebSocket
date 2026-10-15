@@ -33,7 +33,7 @@ export const SidePlate = ({
     active,
     snapshot,
 }: SidePlateProps) => (
-    <div className={`d-side ${active ? 'd-side--turn' : ''}`}>
+    <div className={`d-side d-side--${side} ${active ? 'd-side--turn' : ''}`}>
         <span
             className={`d-side__disc ${
                 side === 'operador' ? 'd-side__disc--us' : 'd-side__disc--them'
@@ -45,7 +45,10 @@ export const SidePlate = ({
                 {label}
                 {active ? <span className="d-acc"> · TURNO</span> : null}
             </p>
-            <p className="d-mute" style={{ margin: '2px 0 0', fontSize: 13 }}>
+            <p
+                className="d-mute d-side__note"
+                style={{ margin: '2px 0 0', fontSize: 13 }}
+            >
                 {note}
             </p>
         </div>
@@ -83,7 +86,7 @@ export const MoveLog = ({
     entries: MatchLogEntry[];
     viewer: Side;
 }) => (
-    <Plate label="REGISTRO DE SEÑAL">
+    <Plate label="REGISTRO DE SEÑAL" className="d-arena__log">
         {entries.length === 0 ? (
             <p className="d-mute" style={{ margin: 0, fontSize: 14 }}>
                 Sin jugadas registradas. El contacto todavía no se movió.
@@ -123,6 +126,8 @@ interface ControlProps {
     onToggleVoice?: () => void;
     showVoice?: boolean;
     showUndo?: boolean;
+    /** Modo espectador: solo se permite silenciar y salir. */
+    spectator?: boolean;
 }
 
 export const MatchControls = ({
@@ -137,19 +142,24 @@ export const MatchControls = ({
     onToggleVoice,
     showVoice = false,
     showUndo = true,
+    spectator = false,
 }: ControlProps) => (
-    <div className="d-row">
-        {showUndo ? (
+    <div className="d-row d-arena__controls">
+        {showUndo && !spectator ? (
             <Button icon={Undo2} onClick={onUndo} disabled={!canUndo}>
                 Deshacer
             </Button>
         ) : null}
-        <Button icon={RotateCcw} onClick={onRestart}>
-            Reiniciar
-        </Button>
-        <Button icon={Flag} onClick={onSurrender} variant="danger">
-            Abandonar
-        </Button>
+        {spectator ? null : (
+            <Button icon={RotateCcw} onClick={onRestart}>
+                Reiniciar
+            </Button>
+        )}
+        {spectator ? null : (
+            <Button icon={Flag} onClick={onSurrender} variant="danger">
+                Abandonar
+            </Button>
+        )}
         <IconButton
             icon={muted ? VolumeX : Volume2}
             label={muted ? 'Activar audio' : 'Silenciar'}

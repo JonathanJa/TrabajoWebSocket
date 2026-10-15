@@ -5,7 +5,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\RemoteStyleController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', fn() => redirect('/damas'))->name('home');
+Route::get('/', fn () => redirect('/damas'))->name('home');
 
 Route::get('/{current_team?}/dashboard', DashboardController::class)
     ->middleware(['auth', 'verified'])

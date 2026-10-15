@@ -10,7 +10,8 @@ export type SoundName =
     | 'invalid'
     | 'win'
     | 'lose'
-    | 'transmit';
+    | 'transmit'
+    | 'applause';
 
 const MUTE_KEY = 'senal.damas.silencio.v1';
 
@@ -23,6 +24,8 @@ const RECIPES: Record<SoundName, number[]> = {
     win: [523, 659, 784, 1046, 1318],
     lose: [392, 330, 262, 196],
     transmit: [880, 1174, 880],
+    // 'applause' se sintetiza aparte (ruido), no usa estas recetas.
+    applause: [],
 };
 
 const DURATIONS: Record<SoundName, number> = {
@@ -34,6 +37,7 @@ const DURATIONS: Record<SoundName, number> = {
     win: 0.14,
     lose: 0.16,
     transmit: 0.06,
+    applause: 0,
 };
 
 const GAINS: Record<SoundName, number> = {
@@ -45,6 +49,7 @@ const GAINS: Record<SoundName, number> = {
     win: 0.09,
     lose: 0.09,
     transmit: 0.05,
+    applause: 0,
 };
 
 let audio: AudioContext | null = null;
@@ -110,6 +115,43 @@ const beep = (
     osc.stop(start + duration + 0.02);
 };
 
+/**
+ * Aplauso sintetizado: una ráfaga densa de "palmadas" de ruido con un
+ * filtro de banda y una caída suave, para celebrar el final de una partida.
+ */
+const applause = (ctx: AudioContext): void => {
+    const start = ctx.currentTime + 0.02;
+    const total = 1.9;
+    const claps = 80;
+
+    for (let index = 0; index < claps; index += 1) {
+        const at = start + Math.random() * total;
+        const length = 0.02 + Math.random() * 0.035;
+        const frames = Math.max(1, Math.floor(ctx.sampleRate * length));
+        const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+        const samples = buffer.getChannelData(0);
+
+        for (let sample = 0; sample < frames; sample += 1) {
+            samples[sample] =
+                (Math.random() * 2 - 1) * Math.exp(-sample / (frames * 0.35));
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 1000 + Math.random() * 2200;
+        filter.Q.value = 0.8;
+
+        const gain = ctx.createGain();
+        gain.gain.value = 0.05 + Math.random() * 0.07;
+
+        source.connect(filter).connect(gain).connect(ctx.destination);
+        source.start(at);
+    }
+};
+
 export const playSound = (name: SoundName): void => {
     if (muted) {
         return;
@@ -118,6 +160,12 @@ export const playSound = (name: SoundName): void => {
     const ctx = context();
 
     if (ctx === null) {
+        return;
+    }
+
+    if (name === 'applause') {
+        applause(ctx);
+
         return;
     }
 

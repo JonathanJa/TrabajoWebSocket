@@ -918,6 +918,45 @@
     border-radius: var(--tp-r-sm);
     animation: tp-pulse 1.4s var(--tp-ease) infinite;
 }
+/* Corrección: se tocó una ficha que no puede moverse. Se bordea fuerte la
+   que sí puede (marco de la casilla + aro de la ficha) y tiembla la otra. */
+.d-sq--must::before {
+    content: '';
+    position: absolute;
+    inset: 2%;
+    border: calc(var(--tp-bw) * 2) solid var(--tp-acc);
+    border-radius: var(--tp-r-sm);
+    box-shadow:
+        0 0 0 1px color-mix(in oklab, var(--tp-acc) 55%, transparent),
+        0 0 18px color-mix(in oklab, var(--tp-acc) 45%, transparent);
+    animation: tp-pulse 1.1s var(--tp-ease) infinite;
+}
+.d-piece--must .d-disc {
+    box-shadow:
+        0 0 0 3px var(--tp-acc),
+        0 0 22px color-mix(in oklab, var(--tp-acc) 55%, transparent);
+}
+.d-piece--rejected {
+    animation: tp-shake 0.42s var(--tp-ease);
+}
+.d-piece--rejected::after {
+    content: '';
+    position: absolute;
+    inset: 11%;
+    border: calc(var(--tp-bw) * 2) solid oklch(0.62 0.2 25);
+    border-radius: var(--tp-img-r);
+    animation: d-reject 0.85s var(--tp-ease) forwards;
+}
+@keyframes d-reject {
+    0%,
+    45% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+    }
+}
 .d-pieces {
     position: absolute;
     inset: 0;
@@ -1204,4 +1243,410 @@
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--tp-mute);
+}
+
+/* ---------- Adaptación a móviles (táctil y pantallas estrechas) ---------- */
+.d-shell {
+    overflow-x: clip;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+.d-board {
+    user-select: none;
+    -webkit-user-select: none;
+}
+.d-hero {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 899px) {
+    .d-wrap {
+        padding: 14px 12px calc(26px + env(safe-area-inset-bottom));
+    }
+    .d-wrap--narrow {
+        padding-bottom: calc(22px + env(safe-area-inset-bottom));
+    }
+    /* El título de la cabecera no debe desbordar en pantallas pequeñas. */
+    .d-display {
+        overflow-wrap: anywhere;
+    }
+    .d-code {
+        font-size: clamp(20px, 7.4vw, 26px);
+        letter-spacing: 0.24em;
+        overflow-wrap: anywhere;
+    }
+    .d-plate {
+        padding: 13px;
+    }
+    .d-plate__label {
+        margin-bottom: 6px;
+    }
+    .d-btn {
+        padding: 10px 14px;
+    }
+    .d-btn--wide {
+        width: 100%;
+    }
+    /* 16px evita el zoom automático de iOS al enfocar un campo. */
+    .d-input {
+        font-size: 16px;
+        letter-spacing: 0.08em;
+    }
+    .d-seg {
+        display: flex;
+        width: 100%;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none;
+    }
+    .d-seg::-webkit-scrollbar {
+        display: none;
+    }
+    .d-seg__item {
+        flex: none;
+    }
+    /* El tablero se ajusta al alto útil para que los mandos sigan visibles. */
+    .d-board {
+        max-width: min(100%, 78vh);
+        margin: 0 auto;
+    }
+    .d-side {
+        padding: 9px 10px;
+        gap: 8px;
+    }
+    .d-log {
+        max-height: 150px;
+    }
+    .d-chat-log {
+        max-height: 240px;
+    }
+    .d-overlay {
+        padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+    }
+    .d-turnbar {
+        padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+    }
+}
+
+@media (max-width: 420px) {
+    .d-wrap {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+    .d-btn {
+        padding: 9px 12px;
+        font-size: 11px;
+    }
+    .d-side {
+        flex-wrap: wrap;
+    }
+    .d-side > div:last-of-type {
+        text-align: left;
+    }
+    /* El ranking pierde el rating y la etiqueta: manda el nombre y el V/D. */
+    .d-rank__row {
+        grid-template-columns: 16px 18px minmax(0, 1fr) 68px;
+    }
+    .d-rank__rating,
+    .d-rank__tag {
+        display: none;
+    }
+}
+
+/* ---------- Marcador de la serie y ranking ---------- */
+.d-score {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.d-score__name {
+    font-family: var(--tp-font-mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    overflow-wrap: anywhere;
+}
+.d-score__value {
+    font-family: var(--tp-font-display);
+    font-size: 26px;
+    line-height: 1;
+    color: var(--tp-ink);
+    font-variant-numeric: tabular-nums;
+}
+.d-score__dash {
+    font-family: var(--tp-font-mono);
+    font-size: 15px;
+    color: var(--tp-mute);
+}
+.d-rank {
+    display: grid;
+    gap: 2px;
+}
+.d-rank__row,
+.d-duel {
+    display: grid;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: var(--tp-bw) solid transparent;
+    border-radius: var(--tp-r-sm);
+    background: none;
+    color: inherit;
+    font-family: var(--tp-font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-align: left;
+}
+.d-rank__row {
+    grid-template-columns: 16px 22px minmax(0, 1fr) 46px 76px 60px;
+    cursor: pointer;
+}
+.d-duel {
+    grid-template-columns: 16px minmax(0, 1fr) 76px;
+}
+.d-rank__row:hover,
+.d-rank__row:focus-visible {
+    border-color: var(--tp-acc);
+    outline: none;
+}
+.d-rank__row--cleared .d-rank__pos,
+.d-duel--ahead .d-rank__pos {
+    color: var(--tp-acc);
+}
+.d-rank__row--level {
+    border-color: color-mix(in oklab, var(--tp-acc) 45%, transparent);
+}
+.d-rank__row--active {
+    background: color-mix(in oklab, var(--tp-acc) 14%, transparent);
+}
+.d-rank__num,
+.d-rank__rating,
+.d-rank__tally {
+    color: var(--tp-mute);
+    font-variant-numeric: tabular-nums;
+}
+.d-rank__name {
+    color: var(--tp-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.d-rank__tag {
+    color: var(--tp-acc);
+    text-align: right;
+}
+
+/* ---------- Mesa: participantes y comentarios ---------- */
+.d-peers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+}
+.d-peer {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+}
+.d-peer__disc {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    border: var(--tp-bw) solid var(--tp-line);
+    background: var(--tp-surf-2);
+}
+.d-peer__disc--operador {
+    background: var(--tp-acc);
+}
+.d-peer__disc--entidad {
+    background: var(--tp-acc-2);
+}
+.d-peer__disc--spectator {
+    background: var(--tp-mute);
+}
+.d-mesa-log {
+    max-height: 220px;
+    margin: 0;
+}
+.d-mesa-line {
+    padding: 6px 9px;
+    border-left: 2px solid var(--tp-line);
+    border-radius: 0 var(--tp-r-sm) var(--tp-r-sm) 0;
+    background: color-mix(in oklab, var(--tp-surf-2) 55%, transparent);
+}
+.d-mesa-line--operador {
+    border-left-color: var(--tp-acc);
+}
+.d-mesa-line--entidad {
+    border-left-color: var(--tp-acc-2);
+}
+.d-mesa-line--spectator {
+    border-left-color: var(--tp-mute);
+}
+.d-mesa-line--self {
+    background: color-mix(in oklab, var(--tp-acc) 10%, transparent);
+}
+.d-mesa-line p {
+    font-size: 13px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+/* ---------- Móvil apaisado: tablero a un costado ----------
+   Con el teléfono de lado el recurso escaso es el alto: el tablero se
+   lleva la izquierda (cuadrado, ajustado al alto de la ventana) y los
+   mandos quedan en una columna desplazable a la derecha, con las placas
+   de los bandos siempre a la vista. */
+@media (orientation: landscape) and (max-height: 560px) {
+    .d-wrap {
+        padding: 10px calc(12px + env(safe-area-inset-right))
+            calc(12px + env(safe-area-inset-bottom))
+            calc(12px + env(safe-area-inset-left));
+    }
+    /* Cabecera en una sola línea para no robarle alto al tablero. */
+    .d-head {
+        --d-title: clamp(17px, 2.8vw, 24px);
+        gap: 8px;
+    }
+    .d-head__stack {
+        flex-direction: row;
+        align-items: baseline;
+        gap: 10px;
+    }
+    .d-head__meta {
+        display: none;
+    }
+    .d-btn {
+        min-height: 40px;
+        padding: 8px 12px;
+    }
+    .d-arena {
+        --d-board-room: calc(100dvh - 80px);
+        --d-side-room: calc(100dvh - 184px);
+        grid-template-columns: minmax(0, 1fr) min(360px, 42vw);
+        grid-template-rows: auto auto minmax(0, 1fr);
+        align-items: start;
+        gap: 10px;
+    }
+    /* En remoto hay además el plato de transmisión: se resume a una línea y
+       roba algo de alto, así que el tablero cede ese espacio. */
+    .d-arena--link {
+        --d-board-room: calc(100dvh - 136px);
+        --d-side-room: calc(100dvh - 234px);
+    }
+    /* Botones en filas cortas para que los mandos quepan de una vez. */
+    .d-arena__controls {
+        gap: 8px;
+    }
+    .d-arena__controls .d-btn,
+    .d-arena__controls .d-btn--icon {
+        min-height: 30px;
+        padding: 4px 10px;
+        font-size: 11px;
+    }
+    .d-arena__controls .d-btn--icon {
+        padding: 0;
+        width: 32px;
+        height: 30px;
+    }
+    .d-arena__link {
+        padding: 4px 10px;
+    }
+    .d-arena__link .d-plate__label {
+        display: none;
+    }
+    .d-arena__link .d-row {
+        flex-wrap: nowrap;
+        align-items: center;
+    }
+    .d-arena__link .d-btn {
+        min-height: 32px;
+        padding: 5px 10px;
+    }
+    /* La sección se disuelve para que el tablero y las placas entren en la
+       rejilla de la arena (tablero a la izquierda, placas a la derecha). */
+    .d-arena__board {
+        display: contents;
+    }
+    /* Los hijos de la sección son los que se colocan en la rejilla. */
+    .d-arena__board > .d-board {
+        grid-column: 1;
+        grid-row: 1 / -1;
+        max-width: min(100%, var(--d-board-room));
+        margin: 0 auto;
+    }
+    .d-arena__board > .d-side--entidad {
+        grid-column: 2;
+        grid-row: 1;
+    }
+    .d-arena__board > .d-side--operador {
+        grid-column: 2;
+        grid-row: 2;
+    }
+    .d-arena__side {
+        grid-column: 2;
+        grid-row: 3;
+        max-height: var(--d-side-room);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* El registro no necesita tanto sitio cuando el alto es mínimo. */
+    .d-log {
+        max-height: 120px;
+    }
+    /* Con poco alto mandan los mandos: estado y botones a la vista, el
+       registro queda al final y se desplaza. */
+    .d-arena__side > .d-arena__status {
+        order: 1;
+    }
+    .d-arena__status .d-plate__label {
+        display: none;
+    }
+    .d-arena__side > .d-arena__controls {
+        order: 2;
+    }
+    .d-arena__side > .d-arena__log {
+        order: 5;
+    }
+    .d-arena__side > .d-arena__score {
+        order: 3;
+    }
+    .d-arena__side > .d-arena__mesa {
+        order: 4;
+    }
+    /* En apaisado el marcador va sin etiqueta y en una línea. */
+    .d-arena__score .d-plate__label {
+        display: none;
+    }
+    .d-arena__score .d-score__value {
+        font-size: 20px;
+    }
+    .d-mesa-log {
+        max-height: 120px;
+    }
+    /* Placas compactas: en apaisado bastan el nombre y el turno. */
+    .d-arena .d-side {
+        padding: 8px 10px;
+        gap: 8px;
+    }
+    .d-arena .d-side__note,
+    .d-arena .d-side > div:last-of-type {
+        display: none;
+    }
+    .d-arena .d-side .d-acc {
+        font-size: 11px;
+    }
+    .d-arena .d-side > .d-col {
+        min-width: 0;
+    }
+    .d-arena .d-side > .d-col > p:first-child {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
 }
