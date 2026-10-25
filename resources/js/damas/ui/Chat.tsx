@@ -83,9 +83,17 @@ export const MesaPlate = ({
                     ) : null}
                 </div>
                 {peers.length > 0 ? (
-                    <div className="d-peers">
+                    <div
+                        className="d-peers"
+                        role="list"
+                        aria-label="Participantes de la mesa"
+                    >
                         {peers.map((peer) => (
-                            <span key={peer.name} className="d-peer">
+                            <span
+                                key={peer.name}
+                                className="d-peer"
+                                role="listitem"
+                            >
                                 <span
                                     className={`d-peer__disc d-peer__disc--${peer.role}`}
                                     aria-hidden="true"
@@ -101,7 +109,9 @@ export const MesaPlate = ({
                 <div
                     className="d-chat-log d-mesa-log"
                     role="log"
+                    tabIndex={0}
                     aria-live="polite"
+                    aria-relevant="additions"
                     aria-label="Comentarios de la mesa"
                 >
                     {lines.length === 0 ? (
@@ -138,6 +148,7 @@ export const MesaPlate = ({
                             key={frase}
                             type="button"
                             className="d-chat-prompt"
+                            aria-label={`Enviar comentario: ${frase}`}
                             onClick={() => send(frase)}
                         >
                             {frase}
@@ -160,6 +171,8 @@ export const MesaPlate = ({
                         value={draft}
                         maxLength={160}
                         placeholder="Comentar..."
+                        autoComplete="off"
+                        enterKeyHint="send"
                         onChange={(event) => setDraft(event.target.value)}
                     />
                     <Button icon={Send} onClick={() => send(draft)}>

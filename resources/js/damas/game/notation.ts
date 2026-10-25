@@ -67,5 +67,10 @@ export const verdictOf = (result: GameResult, humanSide: Side): Verdict => {
     };
 };
 
-export const tallyLabel = (side: Side): string =>
-    side === 'operador' ? 'NOS' : 'ELLOS';
+export const tallyLabel = (side: Side, viewer?: Side | null): string => {
+    if (viewer === null || viewer === undefined) {
+        return side === 'operador' ? 'CLARO' : 'OSCURO';
+    }
+
+    return side === viewer ? 'TÚ' : 'RIVAL';
+};

@@ -1,5 +1,6 @@
 import { useConnectionStatus, useEchoPublic } from '@laravel/echo-react';
 import {
+    Accessibility,
     ArrowLeft,
     BookOpen,
     Bot,
@@ -8,6 +9,7 @@ import {
     Copy,
     Crown,
     Flag,
+    Hexagon,
     Link2,
     MessageCircle,
     Radio,
@@ -39,6 +41,7 @@ import {
     type ProgressMap,
 } from './damas/campaign/progress';
 import type { Move, Side } from './damas/engine/types';
+import { squareName } from './damas/engine/board';
 import {
     duelOf,
     loadDuels,
@@ -54,6 +57,14 @@ import {
 } from './damas/engine/variants';
 import { isLegal, type MatchSnapshot } from './damas/game/matchState';
 import type { AcademyId } from './damas/game/academy';
+import { PLAYER_NAME_MAX, cleanPlayerName } from './damas/game/identity';
+import {
+    loadLocalNames,
+    resolveLocalNames,
+    saveLocalNames,
+    type LocalNames,
+} from './damas/game/localNames';
+import { reportLocalScore, reportScore } from './damas/game/scores';
 import { isMuted, playSound, setMuted } from './damas/game/sound';
 import {
     announceHumanTurn,
@@ -72,6 +83,15 @@ import {
     ThinkingRow,
 } from './damas/ui/Hud';
 import { Academy } from './damas/ui/Academy';
+import { GlobalRankingPlate, RankingPage } from './damas/ui/Ranking';
+import { LocalNamesFields } from './damas/ui/LocalNames';
+import { ChineseGame } from './damas/chinese/ChineseGame';
+import {
+    AccessibilityDialog,
+    loadA11y,
+    saveA11y,
+    type A11yPrefs,
+} from './damas/ui/Accessibility';
 import {
     MesaHint,
     MesaPlate,
@@ -97,7 +117,9 @@ type Page =
     | 'multiplayer'
     | 'waiting'
     | 'match'
-    | 'academy';
+    | 'academy'
+    | 'ranking'
+    | 'chinese';
 type MatchMode = 'ai' | 'local' | 'remote';
 type FreeMode = 'ai' | 'local';
 type RoomRole = 'host' | 'guest' | null;
@@ -236,14 +258,6 @@ const newPlayerId = (): string =>
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const PLAYER_NAME_KEY = 'senal.damas.nombre.v1';
-const PLAYER_NAME_MAX = 18;
-
-const cleanPlayerName = (value: string): string =>
-    value
-        .replace(/[^\p{L}\p{N} ._-]/gu, '')
-        .replace(/\s+/g, ' ')
-        .trimStart()
-        .slice(0, PLAYER_NAME_MAX);
 
 const loadPlayerName = (): string => {
     try {
@@ -260,6 +274,24 @@ const savePlayerName = (value: string): void => {
         window.localStorage.setItem(PLAYER_NAME_KEY, value);
     } catch {
         // Sin almacenamiento local: el nombre solo dura la sesión.
+    }
+};
+
+const BOARD_VIEW_KEY = 'senal.damas.vista.v1';
+
+const loadBoardDepth = (): boolean => {
+    try {
+        return window.localStorage.getItem(BOARD_VIEW_KEY) !== 'flat';
+    } catch {
+        return true;
+    }
+};
+
+const saveBoardDepth = (depth: boolean): void => {
+    try {
+        window.localStorage.setItem(BOARD_VIEW_KEY, depth ? '3d' : 'flat');
+    } catch {
+        // Sin almacenamiento local: la vista solo dura la sesión.
     }
 };
 
@@ -341,15 +373,21 @@ const DamasApp = () => {
     const [isSpectator, setIsSpectator] = useState(false);
     const [roomFull, setRoomFull] = useState(false);
     const [playerName, setPlayerName] = useState(() => loadPlayerName());
+    const [localNames, setLocalNames] = useState<LocalNames>(loadLocalNames);
     const [rivalNames, setRivalNames] = useState<Partial<Record<Side, string>>>(
         {},
     );
     const rivalNamesRef = useRef<Partial<Record<Side, string>>>({});
     const [muted, setMutedState] = useState(isMuted());
     const [voiceEnabled, setVoiceEnabledState] = useState(isVoiceEnabled());
+    const [boardDepth, setBoardDepth] = useState(loadBoardDepth);
+    const [a11y, setA11y] = useState<A11yPrefs>(loadA11y);
+    const [a11yOpen, setA11yOpen] = useState(false);
     const [transportError, setTransportError] = useState('');
     const playerId = useRef(newPlayerId());
     const matchRef = useRef<MatchController | null>(null);
+    const resultRef = useRef<HTMLDivElement | null>(null);
+    const initialPageRef = useRef(true);
     const greetedPeers = useRef<Set<string>>(new Set());
     const startMatchRef = useRef<
         | ((mode: MatchMode, selectedProfile: AiProfile, side: Side) => void)
@@ -360,6 +398,10 @@ const DamasApp = () => {
     const connectionStatus = useConnectionStatus();
     const profile = profileById(profileId);
     const cleanName = cleanPlayerName(playerName);
+    const validPlayerName = cleanName.trim().length >= 2 ? cleanName : '';
+    const localResolved = resolveLocalNames(localNames, validPlayerName);
+    const localNameFor = (side: Side): string =>
+        side === 'operador' ? localResolved.operador : localResolved.entidad;
     const nameOf = (side: Side): string => {
         if (!isSpectator && side === humanSide) {
             return cleanName === '' ? 'TÚ' : cleanName.toUpperCase();
@@ -537,6 +579,62 @@ const DamasApp = () => {
     });
     matchRef.current = match;
 
+    // Preferencias de accesibilidad: se aplican al documento y se recuerdan.
+    useEffect(() => {
+        const root = document.documentElement;
+        root.dataset.contrast = a11y.contrast ? 'high' : 'normal';
+        root.dataset.motion = a11y.reduceMotion ? 'reduce' : 'auto';
+        saveA11y(a11y);
+    }, [a11y]);
+
+    // Al cambiar de pantalla, el foco va al título para que el lector de
+    // pantalla anuncie dónde estamos (la primera carga no lo mueve).
+    useEffect(() => {
+        if (initialPageRef.current) {
+            initialPageRef.current = false;
+
+            return;
+        }
+
+        const active = document.activeElement;
+
+        // Si la pantalla ya enfocó un campo (por ejemplo, el nombre), no se
+        // le quita el foco al usuario.
+        if (
+            active !== null &&
+            (active.tagName === 'INPUT' ||
+                active.tagName === 'TEXTAREA' ||
+                active.tagName === 'SELECT')
+        ) {
+            return;
+        }
+
+        // Un diálogo modal abierto conserva el foco.
+        if (document.querySelector('dialog[open]') !== null) {
+            return;
+        }
+
+        document.getElementById('damas-page-title')?.focus();
+    }, [page]);
+
+    // Cuando termina la partida, el foco pasa al informe para poder leerlo
+    // y actuar sin tener que buscarlo. No se roba el foco si hay un diálogo.
+    useEffect(() => {
+        if (page !== 'match' || match.snapshot.result === null) {
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            if (document.querySelector('dialog[open]') !== null) {
+                return;
+            }
+
+            resultRef.current?.focus();
+        }, 120);
+
+        return () => window.clearTimeout(timer);
+    }, [match.snapshot.result, page]);
+
     // El progreso de la escalera y el historial de rivales viven en el
     // dispositivo: el servidor no guarda estado.
     useEffect(() => {
@@ -546,6 +644,14 @@ const DamasApp = () => {
     useEffect(() => {
         saveDuels(duels);
     }, [duels]);
+
+    useEffect(() => {
+        saveLocalNames(localNames);
+    }, [localNames]);
+
+    useEffect(() => {
+        savePlayerName(cleanName);
+    }, [cleanName]);
 
     useEffect(() => {
         if (
@@ -935,15 +1041,55 @@ const DamasApp = () => {
                 return next;
             });
         }
+
+        // Ranking global: el servidor guarda nombre y puntaje. Es best-effort;
+        // si la base de datos no responde, la partida no se interrumpe.
+        if (matchMode === 'local') {
+            void reportLocalScore(
+                localNames,
+                validPlayerName,
+                winner,
+                'local',
+                match.snapshot.variant,
+                'Duelo local',
+            );
+        } else if (matchMode === 'remote' && !isSpectator) {
+            const rival =
+                (humanSide === 'operador'
+                    ? rivalNamesRef.current.entidad
+                    : rivalNamesRef.current.operador) ?? '';
+
+            void reportScore({
+                name: validPlayerName === '' ? 'INVITADO' : validPlayerName,
+                mode: 'remote',
+                result: winner === null ? 'draw' : humanWon ? 'win' : 'loss',
+                variant: match.snapshot.variant,
+                opponent: rival,
+                detail: 'Duelo por red',
+            });
+        } else if (matchMode === 'ai') {
+            void reportScore({
+                name: validPlayerName === '' ? 'OPERADOR' : validPlayerName,
+                mode: campaignCase === null ? 'ai' : 'campaign',
+                result: winner === null ? 'draw' : humanWon ? 'win' : 'loss',
+                variant: match.snapshot.variant,
+                opponent: profile.callsign,
+                detail: campaignCase === null ? 'Partida libre' : campaignCase,
+            });
+        }
     }, [
         campaignCase,
         humanSide,
         isSpectator,
+        localNames,
         match.snapshot.plies,
         match.snapshot.result,
+        match.snapshot.variant,
         matchMode,
         page,
+        profile.callsign,
         profileId,
+        validPlayerName,
     ]);
 
     // Cuenta atrás del ascenso: sube sola al contacto siguiente si el
@@ -1055,7 +1201,7 @@ const DamasApp = () => {
     };
 
     const createRoom = () => {
-        if (cleanName.length < 2) {
+        if (validPlayerName === '') {
             setTransportError(
                 'Escribe tu nombre (2 letras o más) para crear la sala.',
             );
@@ -1091,7 +1237,7 @@ const DamasApp = () => {
             return;
         }
 
-        if (cleanName.length < 2) {
+        if (validPlayerName === '') {
             setTransportError(
                 'Escribe tu nombre (2 letras o más) para entrar.',
             );
@@ -1127,6 +1273,13 @@ const DamasApp = () => {
         const next = !voiceEnabled;
         setVoiceEnabled(next);
         setVoiceEnabledState(next);
+    };
+
+    const toggleBoardDepth = () => {
+        const next = !boardDepth;
+        setBoardDepth(next);
+        saveBoardDepth(next);
+        playSound('select');
     };
 
     const copyRoom = async () => {
@@ -1175,13 +1328,71 @@ const DamasApp = () => {
                       matchMode === 'local'
                     ? 'TU TURNO'
                     : 'TURNO DE LA IA';
+    const lastEntry =
+        match.snapshot.log.length === 0
+            ? null
+            : match.snapshot.log[match.snapshot.log.length - 1];
+    const lastMoveNote =
+        lastEntry === null
+            ? ''
+            : `Última jugada: ${lastEntry.label}, ${
+                  matchMode === 'local' || isSpectator
+                      ? lastEntry.side === 'operador'
+                          ? 'claras'
+                          : 'oscuras'
+                      : lastEntry.side === humanSide
+                        ? 'tuya'
+                        : 'del rival'
+              }.`;
+    const verdict =
+        match.snapshot.result === null
+            ? null
+            : verdictOf(match.snapshot.result, humanSide);
+    const resultWinner = match.snapshot.result?.winner ?? null;
+    const resultTitle =
+        match.snapshot.result === null
+            ? ''
+            : matchMode === 'local'
+              ? resultWinner === null
+                  ? 'TABLAS'
+                  : `GANÓ ${localNameFor(resultWinner).toUpperCase()}`
+              : isSpectator
+                ? resultWinner === null
+                    ? 'TABLAS'
+                    : `GANARON LAS ${
+                          resultWinner === 'operador' ? 'CLARAS' : 'OSCURAS'
+                      }`
+                : (verdict?.title ?? '');
+    const resultDetail = verdict?.detail ?? '';
+    const matchAnnouncement =
+        match.snapshot.result !== null
+            ? `Partida terminada. ${resultTitle}. ${
+                  resultDetail === '' ? '' : `${resultDetail}. `
+              }${
+                  nextLevel === null
+                      ? ''
+                      : 'El ascenso automático comenzará en diez segundos; se puede cancelar.'
+              }`
+            : `${statusText}.${lastMoveNote === '' ? '' : ` ${lastMoveNote}`}${
+                  match.thinking ? ' La señal está calculando.' : ''
+              }`;
 
     return (
         <Screen>
             {remoteActive ? (
                 <RemoteChannel room={room} onMessage={onRemoteMessage} />
             ) : null}
-            <main className="d-wrap d-stack">
+            <AccessibilityDialog
+                open={a11yOpen}
+                prefs={a11y}
+                onChange={setA11y}
+                onClose={() => setA11yOpen(false)}
+            />
+            <main
+                id="damas-main"
+                className="d-wrap d-stack d-main"
+                tabIndex={-1}
+            >
                 {page !== 'home' && page !== 'match' ? (
                     <Button
                         icon={ArrowLeft}
@@ -1291,6 +1502,51 @@ const DamasApp = () => {
                                     </Button>
                                 </div>
                             </Plate>
+                            <Plate label="DAMAS CHINAS · 2 JUGADORES">
+                                <div className="d-stack" style={{ gap: 10 }}>
+                                    <Hexagon size={24} className="d-acc" />
+                                    <h2
+                                        className="d-display"
+                                        style={{ margin: 0, fontSize: 18 }}
+                                    >
+                                        LA ESTRELLA
+                                    </h2>
+                                    <Button
+                                        icon={Hexagon}
+                                        onClick={() => setPage('chinese')}
+                                    >
+                                        Jugar damas chinas
+                                    </Button>
+                                </div>
+                            </Plate>
+                            <Plate label="ACCESIBILIDAD">
+                                <div className="d-stack" style={{ gap: 10 }}>
+                                    <Accessibility
+                                        size={24}
+                                        className="d-acc"
+                                    />
+                                    <h2
+                                        className="d-display"
+                                        style={{ margin: 0, fontSize: 18 }}
+                                    >
+                                        JUGAR A TU MANERA
+                                    </h2>
+                                    <p
+                                        className="d-mute"
+                                        style={{ margin: 0, fontSize: 13 }}
+                                    >
+                                        Alto contraste, movimiento reducido y
+                                        tablero por teclado con flechas y Enter.
+                                    </p>
+                                    <Button
+                                        id="a11y-trigger-home"
+                                        icon={Accessibility}
+                                        onClick={() => setA11yOpen(true)}
+                                    >
+                                        Ajustar accesibilidad
+                                    </Button>
+                                </div>
+                            </Plate>
                         </div>
                         <Plate label="REGISTRO DE CAMPAÑA" sunken>
                             <div className="d-row d-row--between">
@@ -1301,6 +1557,44 @@ const DamasApp = () => {
                                 <StatusLine text={`RANGO · ${stats.rank}`} />
                             </div>
                         </Plate>
+                        <GlobalRankingPlate
+                            name={playerName}
+                            onNameChange={setPlayerName}
+                            onOpen={() => setPage('ranking')}
+                        />
+                    </>
+                ) : null}
+
+                {page === 'ranking' ? (
+                    <>
+                        <Header
+                            code="RANKING GLOBAL · BASE DE DATOS"
+                            title="MEJORES PUNTAJES"
+                            meta="NOMBRES Y PUNTAJES GUARDADOS EN EL SERVIDOR"
+                        />
+                        <RankingPage />
+                    </>
+                ) : null}
+
+                {page === 'chinese' ? (
+                    <>
+                        <Header
+                            code="DAMAS CHINAS · 2 JUGADORES"
+                            title="LA ESTRELLA"
+                            meta="121 HUECOS · 10 CANICAS POR JUGADOR · SIN CAPTURAS"
+                        />
+                        <ChineseGame
+                            names={localNames}
+                            onNamesChange={setLocalNames}
+                            fallbackName={validPlayerName}
+                            onOpenTutorial={() => {
+                                setAcademyId('chinese');
+                                setPageBeforeAcademy('chinese');
+                                setPage('academy');
+                            }}
+                            onOpenRanking={() => setPage('ranking')}
+                            onExit={() => setPage('home')}
+                        />
                     </>
                 ) : null}
 
@@ -1546,17 +1840,42 @@ const DamasApp = () => {
                                 />
                             </>
                         ) : (
-                            <Plate label="DUELO LOCAL">
-                                <Button
-                                    icon={Swords}
-                                    variant="accent"
-                                    onClick={() =>
-                                        startMatch('local', profile, 'operador')
-                                    }
-                                >
-                                    Comenzar duelo
-                                </Button>
-                            </Plate>
+                            <>
+                                <LocalNamesFields
+                                    names={localNames}
+                                    onChange={setLocalNames}
+                                    fallbackName={validPlayerName}
+                                />
+                                <Plate label="DUELO LOCAL">
+                                    <div
+                                        className="d-stack"
+                                        style={{ gap: 10 }}
+                                    >
+                                        <p
+                                            className="d-mute"
+                                            style={{ margin: 0 }}
+                                        >
+                                            Dos personas en el mismo
+                                            dispositivo. Al terminar, ambos
+                                            nombres suman puntos en el ranking
+                                            global.
+                                        </p>
+                                        <Button
+                                            icon={Swords}
+                                            variant="accent"
+                                            onClick={() =>
+                                                startMatch(
+                                                    'local',
+                                                    profile,
+                                                    'operador',
+                                                )
+                                            }
+                                        >
+                                            Comenzar duelo
+                                        </Button>
+                                    </div>
+                                </Plate>
+                            </>
                         )}
                         {freeMode === 'ai' ? (
                             <Button
@@ -1597,6 +1916,9 @@ const DamasApp = () => {
                                     value={playerName}
                                     maxLength={PLAYER_NAME_MAX}
                                     autoComplete="nickname"
+                                    enterKeyHint="next"
+                                    aria-required="true"
+                                    aria-describedby="player-name-help"
                                     autoFocus
                                     placeholder="EJ. ANA"
                                     onChange={(event) =>
@@ -1614,11 +1936,12 @@ const DamasApp = () => {
                                     }}
                                 />
                                 <p
+                                    id="player-name-help"
                                     className="d-mute d-mono"
                                     style={{ margin: 0, fontSize: 12 }}
                                 >
-                                    {cleanName.length < 2
-                                        ? 'ESCRIBE TU NOMBRE PARA JUGAR'
+                                    {validPlayerName === ''
+                                        ? 'ESCRIBE TU NOMBRE (MÍNIMO 2 LETRAS) PARA JUGAR'
                                         : `JUGARÁS COMO ${cleanName.toUpperCase()} · EL RIVAL VERÁ ESTE NOMBRE`}
                                 </p>
                             </div>
@@ -1630,7 +1953,7 @@ const DamasApp = () => {
                                     <Button
                                         icon={Users}
                                         variant="accent"
-                                        disabled={cleanName.length < 2}
+                                        disabled={validPlayerName === ''}
                                         onClick={createRoom}
                                     >
                                         Crear sala
@@ -1651,6 +1974,11 @@ const DamasApp = () => {
                                         value={roomInput}
                                         maxLength={8}
                                         autoComplete="off"
+                                        autoCapitalize="characters"
+                                        spellCheck={false}
+                                        enterKeyHint="go"
+                                        aria-required="true"
+                                        aria-describedby="room-code-help"
                                         placeholder="EJ. 7KQ2LM"
                                         onChange={(event) =>
                                             setRoomInput(
@@ -1670,17 +1998,19 @@ const DamasApp = () => {
                                         icon={Link2}
                                         disabled={
                                             roomInput.length < 3 ||
-                                            cleanName.length < 2
+                                            validPlayerName === ''
                                         }
                                         onClick={joinRoom}
                                     >
                                         Entrar a la sala
                                     </Button>
                                     <p
+                                        id="room-code-help"
                                         className="d-mute d-mono"
                                         style={{ margin: 0, fontSize: 12 }}
                                     >
-                                        PULSA ENTER PARA ENTRAR
+                                        MÍNIMO 3 CARACTERES · PULSA ENTER PARA
+                                        ENTRAR
                                     </p>
                                 </div>
                             </Plate>
@@ -1691,15 +2021,19 @@ const DamasApp = () => {
                                 <StatusLine
                                     text={`WEBSOCKET · ${String(connectionStatus).toUpperCase()}`}
                                     accent={connectionStatus === 'connected'}
+                                    role="status"
                                 />
-                                {cleanName.length < 2 ? null : (
+                                {validPlayerName === '' ? null : (
                                     <StatusLine
                                         text={`IDENTIDAD · ${cleanName.toUpperCase()}`}
                                         accent
                                     />
                                 )}
                                 {transportError !== '' ? (
-                                    <StatusLine text={transportError} />
+                                    <StatusLine
+                                        text={transportError}
+                                        role="alert"
+                                    />
                                 ) : null}
                             </div>
                         </Plate>
@@ -1764,11 +2098,10 @@ const DamasApp = () => {
                         ) : (
                             <Plate label="CÓDIGO DE INVITACIÓN" accent>
                                 <div className="d-stack" style={{ gap: 12 }}>
-                                    <p
-                                        className="d-code"
-                                        aria-label={`Código ${room}`}
-                                        style={{ margin: 0 }}
-                                    >
+                                    <p className="d-code" style={{ margin: 0 }}>
+                                        <span className="sr-only">
+                                            Código de sala:{' '}
+                                        </span>
                                         {room}
                                     </p>
                                     <div className="d-row d-row--between">
@@ -1783,6 +2116,7 @@ const DamasApp = () => {
                                                       : `UNIÉNDOTE A LA SALA · TÚ: ${nameOf('entidad')}`
                                             }
                                             accent={peerOnline || remoteSynced}
+                                            role="status"
                                         />
                                         <Button
                                             icon={copyDone ? Check : Copy}
@@ -1795,10 +2129,16 @@ const DamasApp = () => {
                                     </div>
                                     <MesaHint peers={peerList} />
                                     {connectionStatus === 'failed' ? (
-                                        <StatusLine text="SIN CONEXIÓN EN VIVO. Si usas un túnel (cloudflared), apúntalo al proxy de multijugador y no al servidor web: ejecuta «npm run proxy» y crea el túnel hacia http://localhost:8100" />
+                                        <StatusLine
+                                            text="SIN CONEXIÓN EN VIVO. Si usas un túnel (cloudflared), apúntalo al proxy de multijugador y no al servidor web: ejecuta «npm run proxy» y crea el túnel hacia http://localhost:8100"
+                                            role="alert"
+                                        />
                                     ) : null}
                                     {transportError !== '' ? (
-                                        <StatusLine text={transportError} />
+                                        <StatusLine
+                                            text={transportError}
+                                            role="alert"
+                                        />
                                     ) : null}
                                 </div>
                             </Plate>
@@ -1855,6 +2195,14 @@ const DamasApp = () => {
                                 </div>
                             }
                         />
+                        <p
+                            className="sr-only"
+                            role="status"
+                            aria-live="polite"
+                            aria-atomic="true"
+                        >
+                            {matchAnnouncement}
+                        </p>
                         {matchMode === 'remote' ? (
                             <Plate
                                 label="ESTADO DE TRANSMISIÓN"
@@ -1868,6 +2216,7 @@ const DamasApp = () => {
                                             peerOnline &&
                                             connectionStatus === 'connected'
                                         }
+                                        role="status"
                                     />
                                     <Button
                                         icon={RotateCcw}
@@ -1895,7 +2244,7 @@ const DamasApp = () => {
                                         matchMode === 'remote'
                                             ? `${nameOf('entidad')} · OSCURO`
                                             : matchMode === 'local'
-                                              ? 'JUGADOR 2 · OSCURO'
+                                              ? `${localNameFor('entidad').toUpperCase()} · OSCURO`
                                               : 'SEÑAL · OSCURO'
                                     }
                                     note={
@@ -1909,16 +2258,32 @@ const DamasApp = () => {
                                         match.snapshot.result === null
                                     }
                                     snapshot={match.snapshot}
+                                    viewer={
+                                        isSpectator || matchMode === 'local'
+                                            ? null
+                                            : humanSide
+                                    }
                                 />
                                 <Board
                                     board={match.snapshot.board}
                                     animation={match.animation}
                                     selection={match.selection}
                                     targets={match.targets}
+                                    selectable={
+                                        canUseBoard
+                                            ? match.selectable
+                                            : undefined
+                                    }
                                     lastMove={match.snapshot.lastMove}
                                     onSquare={match.onSquare}
+                                    onCancel={match.clearSelection}
                                     interactive={canUseBoard}
                                     variant={match.snapshot.variant}
+                                    viewer={
+                                        isSpectator || matchMode === 'local'
+                                            ? null
+                                            : humanSide
+                                    }
                                     mustMove={
                                         canUseBoard ? match.mustMove : undefined
                                     }
@@ -1929,6 +2294,7 @@ const DamasApp = () => {
                                         matchMode === 'remote' &&
                                         humanSide === 'entidad'
                                     }
+                                    depth={boardDepth}
                                 />
                                 <SidePlate
                                     side="operador"
@@ -1936,7 +2302,7 @@ const DamasApp = () => {
                                         matchMode === 'remote'
                                             ? `${nameOf('operador')} · CLARO`
                                             : matchMode === 'local'
-                                              ? 'JUGADOR 1 · CLARO'
+                                              ? `${localNameFor('operador').toUpperCase()} · CLARO`
                                               : 'OPERADOR · CLARO'
                                     }
                                     note={
@@ -1950,6 +2316,11 @@ const DamasApp = () => {
                                         match.snapshot.result === null
                                     }
                                     snapshot={match.snapshot}
+                                    viewer={
+                                        isSpectator || matchMode === 'local'
+                                            ? null
+                                            : humanSide
+                                    }
                                 />
                             </section>
                             <aside className="d-stack d-arena__side">
@@ -1963,6 +2334,65 @@ const DamasApp = () => {
                                         style={{ gap: 10 }}
                                     >
                                         <StatusLine text={statusText} accent />
+                                        {canUseBoard &&
+                                        match.selection !== null &&
+                                        match.targets.size > 0 ? (
+                                            <div
+                                                className="d-moves"
+                                                role="group"
+                                                aria-label="Movimientos disponibles"
+                                            >
+                                                <p
+                                                    className="d-mono d-mute"
+                                                    style={{ margin: 0 }}
+                                                >
+                                                    MOVER A
+                                                </p>
+                                                <div className="d-moves__list">
+                                                    {[
+                                                        ...match.targets.entries(),
+                                                    ].map(([to, move]) => {
+                                                        const captures =
+                                                            move.captures
+                                                                .length;
+                                                        const name = squareName(
+                                                            to,
+                                                            match.snapshot
+                                                                .variant,
+                                                        );
+
+                                                        return (
+                                                            <button
+                                                                key={to}
+                                                                type="button"
+                                                                className="d-move"
+                                                                aria-label={`Mover a ${name}${
+                                                                    captures > 0
+                                                                        ? `, capturando ${captures} ficha${captures === 1 ? '' : 's'}`
+                                                                        : ''
+                                                                }`}
+                                                                onClick={() =>
+                                                                    match.onSquare(
+                                                                        to,
+                                                                    )
+                                                                }
+                                                            >
+                                                                {name}
+                                                                {captures >
+                                                                0 ? (
+                                                                    <span aria-hidden="true">
+                                                                        ×
+                                                                        {
+                                                                            captures
+                                                                        }
+                                                                    </span>
+                                                                ) : null}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ) : null}
                                         {match.mustMove.size > 0 ? (
                                             <StatusLine
                                                 text="SEÑAL RECHAZADA · MOVER LA FICHA MARCADA"
@@ -1975,39 +2405,35 @@ const DamasApp = () => {
                                             />
                                         ) : null}
                                         {transportError !== '' ? (
-                                            <StatusLine text={transportError} />
+                                            <StatusLine
+                                                text={transportError}
+                                                role="alert"
+                                            />
                                         ) : null}
                                         {match.snapshot.result !== null ? (
                                             <div
-                                                className="d-stack"
+                                                ref={resultRef}
+                                                tabIndex={-1}
+                                                role="region"
+                                                aria-labelledby="match-result-title"
+                                                className="d-stack d-result"
                                                 style={{ gap: 8 }}
                                             >
                                                 <h2
+                                                    id="match-result-title"
                                                     className="d-display"
                                                     style={{
                                                         margin: 0,
                                                         fontSize: 19,
                                                     }}
                                                 >
-                                                    {
-                                                        verdictOf(
-                                                            match.snapshot
-                                                                .result,
-                                                            humanSide,
-                                                        ).title
-                                                    }
+                                                    {resultTitle}
                                                 </h2>
                                                 <p
                                                     className="d-mute"
                                                     style={{ margin: 0 }}
                                                 >
-                                                    {
-                                                        verdictOf(
-                                                            match.snapshot
-                                                                .result,
-                                                            humanSide,
-                                                        ).detail
-                                                    }
+                                                    {resultDetail}
                                                 </p>
                                                 {nextLevel !== null ? (
                                                     <div
@@ -2144,7 +2570,11 @@ const DamasApp = () => {
                                 ) : null}
                                 <MoveLog
                                     entries={match.snapshot.log}
-                                    viewer={humanSide}
+                                    viewer={
+                                        isSpectator || matchMode === 'local'
+                                            ? null
+                                            : humanSide
+                                    }
                                 />
                                 <MatchControls
                                     canUndo={match.canUndo}
@@ -2170,6 +2600,9 @@ const DamasApp = () => {
                                     onToggleVoice={toggleVoice}
                                     showVoice={matchMode === 'ai'}
                                     showUndo={matchMode !== 'remote'}
+                                    depth={boardDepth}
+                                    onToggleDepth={toggleBoardDepth}
+                                    onOpenA11y={() => setA11yOpen(true)}
                                     spectator={isSpectator}
                                 />
                             </aside>

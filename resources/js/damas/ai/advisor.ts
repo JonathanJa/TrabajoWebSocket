@@ -5,7 +5,7 @@ import {
     search,
     type SearchOutcome,
 } from './search';
-import type { AiProfile } from './profiles';
+import type { AiSearchConfig } from './profiles';
 import type { Board, Move, Side } from '../engine/types';
 import { DEFAULT_VARIANT, type VariantId } from '../engine/variants';
 
@@ -39,11 +39,10 @@ const instant = (move: Move): SearchOutcome => ({
 export const chooseMove = (
     board: Board,
     side: Side,
-    profile: AiProfile,
+    config: AiSearchConfig,
     variant: VariantId = DEFAULT_VARIANT,
 ): Advice => {
     const legal = generateMoves(board, side, {}, variant);
-    const config = profile.config;
     const ctx = createContext(config.timeMs);
 
     if (legal.length === 0) {

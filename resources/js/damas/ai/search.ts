@@ -36,6 +36,7 @@ export const createContext = (timeMs: number): SearchContext => ({
     aborted: false,
     tt: new TranspositionTable(),
     history: new Map<number, number>(),
+    killers: [],
 });
 
 const orderRoot = (
@@ -87,22 +88,31 @@ export const search = (
         let iterScore = -Infinity;
         let alpha = -Infinity;
 
-        for (const move of ordered) {
+        for (let i = 0; i < ordered.length; i += 1) {
+            const move = ordered[i];
             const child = applyMove(board, move, variant);
             const childKey = keyOf(child, childSide);
-            const score = -negamax(
-                ctx,
-                child,
-                childSide,
-                depth - 1,
-                -Infinity,
-                -alpha,
-                1,
-                childKey.a,
-                childKey.b,
-                limits.extensions,
-                variant,
-            );
+            const run = (window: 'full' | 'zero'): number =>
+                -negamax(
+                    ctx,
+                    child,
+                    childSide,
+                    depth - 1,
+                    window === 'full' ? -Infinity : -alpha - 1,
+                    -alpha,
+                    1,
+                    childKey.a,
+                    childKey.b,
+                    limits.extensions,
+                    variant,
+                );
+
+            let score =
+                i === 0 || alpha === -Infinity ? run('full') : run('zero');
+
+            if (i > 0 && score > alpha) {
+                score = run('full');
+            }
 
             if (ctx.aborted) {
                 break;

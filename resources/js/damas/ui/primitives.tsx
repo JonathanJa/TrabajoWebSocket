@@ -12,6 +12,7 @@ interface ButtonProps {
     wide?: boolean;
     title?: string;
     ariaLabel?: string;
+    id?: string;
 }
 
 const variantClass: Record<ButtonVariant, string> = {
@@ -30,8 +31,10 @@ export const Button = ({
     wide = false,
     title,
     ariaLabel,
+    id,
 }: ButtonProps) => (
     <button
+        id={id}
         type="button"
         className={`d-btn ${variantClass[variant]} ${wide ? 'd-btn--wide' : ''}`}
         onClick={onClick}
@@ -52,6 +55,7 @@ interface IconButtonProps {
     disabled?: boolean;
     label: string;
     variant?: ButtonVariant;
+    id?: string;
 }
 
 export const IconButton = ({
@@ -60,8 +64,10 @@ export const IconButton = ({
     disabled = false,
     label,
     variant = 'plain',
+    id,
 }: IconButtonProps) => (
     <button
+        id={id}
         type="button"
         className={`d-btn d-btn--icon ${variantClass[variant]}`}
         onClick={onClick}
@@ -153,7 +159,7 @@ export const SegNav = <T extends string>({
     onChange: (next: T) => void;
     label: string;
 }) => (
-    <div className="d-seg" role="tablist" aria-label={label}>
+    <div className="d-seg" role="group" aria-label={label}>
         {options.map((option) => {
             const Icon = option.icon;
 
@@ -161,9 +167,8 @@ export const SegNav = <T extends string>({
                 <button
                     key={option.value}
                     type="button"
-                    role="tab"
                     className="d-seg__item"
-                    aria-selected={option.value === value}
+                    aria-pressed={option.value === value}
                     onClick={() => onChange(option.value)}
                 >
                     {Icon === undefined ? null : (

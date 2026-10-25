@@ -13,8 +13,10 @@ export interface TTEntry {
 }
 
 const MAX_ENTRIES = TT_TABLE_LIMIT;
+/** Al desbordar se descarta la cuarta parte más antigua (no toda la tabla). */
+const EVICT_SHARE = 4;
 
-/** Tabla de transposicion con tope de memoria: se vacia al desbordar. */
+/** Tabla de transposición con tope de memoria y reemplazo por profundidad. */
 export class TranspositionTable {
     private readonly entries = new Map<number, TTEntry>();
 
@@ -23,11 +25,31 @@ export class TranspositionTable {
     }
 
     public write(a: number, b: number, entry: TTEntry): void {
-        if (this.entries.size >= MAX_ENTRIES) {
-            this.entries.clear();
+        const key = packKey(a, b);
+        const current = this.entries.get(key);
+
+        // Nunca se pierde una entrada más profunda a manos de una más pobre.
+        if (current !== undefined && current.depth > entry.depth) {
+            return;
         }
 
-        this.entries.set(packKey(a, b), entry);
+        if (current === undefined && this.entries.size >= MAX_ENTRIES) {
+            this.evictOldest();
+        }
+
+        this.entries.set(key, entry);
+    }
+
+    private evictOldest(): void {
+        const goal = Math.ceil(MAX_ENTRIES / EVICT_SHARE);
+
+        for (const key of this.entries.keys()) {
+            this.entries.delete(key);
+
+            if (this.entries.size <= MAX_ENTRIES - goal) {
+                break;
+            }
+        }
     }
 
     public get size(): number {

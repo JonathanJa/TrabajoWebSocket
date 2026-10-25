@@ -1,5 +1,7 @@
 import {
+    Accessibility,
     Activity,
+    Box,
     Flag,
     Mic,
     MicOff,
@@ -23,6 +25,8 @@ interface SidePlateProps {
     icon?: LucideIcon;
     active: boolean;
     snapshot: MatchSnapshot;
+    /** Bando del jugador; null para duelo local o espectador. */
+    viewer?: Side | null;
 }
 
 export const SidePlate = ({
@@ -32,6 +36,7 @@ export const SidePlate = ({
     icon: Icon,
     active,
     snapshot,
+    viewer = null,
 }: SidePlateProps) => (
     <div className={`d-side d-side--${side} ${active ? 'd-side--turn' : ''}`}>
         <span
@@ -54,7 +59,7 @@ export const SidePlate = ({
         </div>
         <div style={{ textAlign: 'right' }}>
             <p className="d-quiet" style={{ margin: 0 }}>
-                {tallyLabel(side)}
+                {tallyLabel(side, viewer)}
             </p>
             <p className="d-mono d-acc" style={{ margin: 0, fontSize: 13 }}>
                 {countPieces(snapshot.board, side)} en campo
@@ -84,7 +89,7 @@ export const MoveLog = ({
     viewer,
 }: {
     entries: MatchLogEntry[];
-    viewer: Side;
+    viewer: Side | null;
 }) => (
     <Plate label="REGISTRO DE SEÑAL" className="d-arena__log">
         {entries.length === 0 ? (
@@ -92,18 +97,21 @@ export const MoveLog = ({
                 Sin jugadas registradas. El contacto todavía no se movió.
             </p>
         ) : (
-            <ul className="d-log">
+            <ul className="d-log" tabIndex={0} aria-label="Registro de jugadas">
                 {entries
                     .slice()
                     .reverse()
                     .map((entry) => (
                         <li key={entry.id}>
                             <b>{String(entry.ply).padStart(3, '0')}</b>{' '}
-                            {tallyLabel(entry.side)} <b>{entry.label}</b>
+                            {tallyLabel(entry.side, viewer)}{' '}
+                            <b>{entry.label}</b>
                             {entry.captured > 0
-                                ? ` · ${entry.captured} abducida(s)`
+                                ? ` · ${entry.captured} captura${
+                                      entry.captured === 1 ? '' : 's'
+                                  }`
                                 : ''}
-                            {entry.crowned ? ' · DAMAS' : ''}
+                            {entry.crowned ? ' · CORONACIÓN' : ''}
                             {entry.side === viewer && entry.captured > 0
                                 ? ' ·'
                                 : ''}
@@ -126,6 +134,11 @@ interface ControlProps {
     onToggleVoice?: () => void;
     showVoice?: boolean;
     showUndo?: boolean;
+    /** Vista del tablero (3D o plana) y su alternador. */
+    depth: boolean;
+    onToggleDepth: () => void;
+    /** Abre el panel de opciones de accesibilidad. */
+    onOpenA11y: () => void;
     /** Modo espectador: solo se permite silenciar y salir. */
     spectator?: boolean;
 }
@@ -142,6 +155,9 @@ export const MatchControls = ({
     onToggleVoice,
     showVoice = false,
     showUndo = true,
+    depth,
+    onToggleDepth,
+    onOpenA11y,
     spectator = false,
 }: ControlProps) => (
     <div className="d-row d-arena__controls">
@@ -165,6 +181,17 @@ export const MatchControls = ({
             label={muted ? 'Activar audio' : 'Silenciar'}
             onClick={onToggleMute}
         />
+        <IconButton
+            icon={Box}
+            label={depth ? 'Ver el tablero plano' : 'Ver el tablero en 3D'}
+            onClick={onToggleDepth}
+        />
+        <IconButton
+            id="a11y-trigger"
+            icon={Accessibility}
+            label="Opciones de accesibilidad"
+            onClick={onOpenA11y}
+        />
         {showVoice && onToggleVoice !== undefined ? (
             <IconButton
                 icon={voiceEnabled ? Mic : MicOff}
@@ -183,13 +210,17 @@ export const MatchControls = ({
 export const StatusLine = ({
     text,
     accent,
+    role,
 }: {
     text: string;
     accent?: boolean;
+    /** Anuncia cambios de estado o errores a los lectores de pantalla. */
+    role?: 'status' | 'alert';
 }) => (
     <p
         className={`d-mono ${accent === true ? 'd-acc' : 'd-mute'}`}
         style={{ margin: 0 }}
+        role={role}
     >
         {text}
     </p>

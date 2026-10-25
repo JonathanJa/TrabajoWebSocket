@@ -4,7 +4,11 @@ import type { ReactNode } from 'react';
 export const Screen = ({ children }: { children: ReactNode }) => (
     <div className="tp-stage">
         <div className="tp-screen d-shell">
+            <a className="d-skip" href="#damas-main">
+                Saltar al contenido principal
+            </a>
             <span className="tp-fx" aria-hidden="true" />
+            <span className="d-aurora" aria-hidden="true" />
             <span className="d-stars" aria-hidden="true" />
             <span className="d-rings" aria-hidden="true" />
             <span className="d-scan" aria-hidden="true" />
@@ -33,6 +37,8 @@ export const Header = ({ code, title, meta, right }: HeaderProps) => (
                 {code}
             </p>
             <h1
+                id="damas-page-title"
+                tabIndex={-1}
                 className="d-display d-head__title"
                 style={{
                     fontSize: 'var(--d-title, clamp(26px,7vw,40px))',

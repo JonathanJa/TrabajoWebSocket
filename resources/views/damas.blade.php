@@ -6,6 +6,9 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#050b08">
+    <meta name="color-scheme" content="dark">
+    <meta name="description"
+        content="Damas del Desierto: damas españolas, campaña de ocho casos, multijugador en vivo y una IA exigente. Tablero accesible por teclado, alto contraste y movimiento reducido.">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>SEÑAL — Damas del Desierto</title>
 

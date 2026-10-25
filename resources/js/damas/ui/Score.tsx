@@ -141,7 +141,11 @@ export const LadderRankPlate = ({
                         {AI_PROFILES.length} SUPERADOS
                     </span>
                 </div>
-                <div className="d-rank" role="list">
+                <div
+                    className="d-rank"
+                    role="group"
+                    aria-label="Contactos de la escalera"
+                >
                     {AI_PROFILES.map((profile, index) => {
                         const record = recordOf(ladder, profile.id);
                         const cleared = record.wins > 0;
@@ -152,7 +156,7 @@ export const LadderRankPlate = ({
                             <button
                                 key={profile.id}
                                 type="button"
-                                role="listitem"
+                                aria-pressed={active}
                                 className={[
                                     'd-rank__row',
                                     cleared ? 'd-rank__row--cleared' : '',
@@ -226,13 +230,18 @@ export const DuelRankPlate = ({ duels }: { duels: DuelMap }) => {
                         SIN HISTORIAL TODAVÍA · JUGÁ UNA SERIE POR RED
                     </p>
                 ) : (
-                    <div className="d-rank">
+                    <div
+                        className="d-rank"
+                        role="list"
+                        aria-label="Ranking de rivales"
+                    >
                         {rows.map((row, index) => {
                             const ahead = row.wins >= row.losses;
 
                             return (
                                 <div
                                     key={row.name}
+                                    role="listitem"
                                     className={`d-duel ${
                                         ahead ? 'd-duel--ahead' : ''
                                     }`}

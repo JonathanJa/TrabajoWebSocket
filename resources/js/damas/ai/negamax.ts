@@ -1,5 +1,10 @@
 import { evaluate } from './evaluate';
-import { bumpHistory, orderMoves, type HistoryTable } from './ordering';
+import {
+    bumpHistory,
+    historyKey,
+    orderMoves,
+    type HistoryTable,
+} from './ordering';
 import { MATE_SCORE } from './limits';
 import {
     pieceCode,
@@ -21,12 +26,16 @@ export interface SearchContext {
     aborted: boolean;
     tt: TranspositionTable;
     history: HistoryTable;
+    /** Dos jugadas "asesinas" por ply: cortan bien y no son capturas. */
+    killers: number[][];
 }
 
 const TIME_CHECK_MASK = 511;
+const NO_KILLERS: readonly number[] = [];
 
 /**
- * Negamax con alpha-beta, tabla de transposición y extensión de capturas.
+ * Negamax con alpha-beta, tabla de transposición, extensión de capturas,
+ * reducción de jugadas tardías (LMR) y heurística de killers.
  * Devuelve la puntuación desde la perspectiva de `side`.
  */
 export const negamax = (
@@ -93,6 +102,7 @@ export const negamax = (
         entry?.from ?? -1,
         entry?.to ?? -1,
         ctx.history,
+        ctx.killers[ply] ?? NO_KILLERS,
     );
     const childSide = opposite(side);
     const extend = forced && extensionsLeft > 0;
@@ -103,7 +113,8 @@ export const negamax = (
     let bestFrom = -1;
     let bestTo = -1;
 
-    for (const move of ordered) {
+    for (let index = 0; index < ordered.length; index += 1) {
+        const move = ordered[index];
         const mover = board[move.from];
         const child = applyMove(board, move, variant);
         const placed = child[move.to];
@@ -131,19 +142,44 @@ export const negamax = (
             childKeyB = xorPieceB(childKeyB, captured, pieceCode(victim));
         }
 
-        const score = -negamax(
-            ctx,
-            child,
-            childSide,
-            childDepth,
-            -beta,
-            -alpha,
-            ply + 1,
-            childKeyA,
-            childKeyB,
-            childExtensions,
-            variant,
-        );
+        const run = (reduce: number, window: 'full' | 'zero'): number =>
+            -negamax(
+                ctx,
+                child,
+                childSide,
+                childDepth - reduce,
+                window === 'full' ? -beta : -alpha - 1,
+                -alpha,
+                ply + 1,
+                childKeyA,
+                childKeyB,
+                childExtensions,
+                variant,
+            );
+
+        const quiet = move.captures.length === 0 && !move.promotion;
+        let score: number;
+
+        if (index === 0 || alpha === -Infinity) {
+            score = run(0, 'full');
+        } else if (quiet && !extend && childDepth >= 3 && index >= 3) {
+            // Las jugadas tranquilas que quedan al final se prueban con menos
+            // profundidad; si superan alpha, se repiten a profundidad completa.
+            const reduce = index >= 7 && childDepth >= 4 ? 2 : 1;
+
+            score = run(reduce, 'zero');
+
+            if (score > alpha) {
+                score = run(0, 'full');
+            }
+        } else {
+            // PVS: ventana nula para el resto y re-búsqueda si mejora alpha.
+            score = run(0, 'zero');
+
+            if (score > alpha && score < beta) {
+                score = run(0, 'full');
+            }
+        }
 
         if (ctx.aborted) {
             return 0;
@@ -161,6 +197,17 @@ export const negamax = (
 
         if (alpha >= beta) {
             bumpHistory(ctx.history, move, depth);
+
+            if (quiet) {
+                const key = historyKey(move);
+                const slots = ctx.killers[ply] ?? (ctx.killers[ply] = []);
+
+                if (slots[0] !== key) {
+                    slots[1] = slots[0] ?? -1;
+                    slots[0] = key;
+                }
+            }
+
             break;
         }
     }

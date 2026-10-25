@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { chooseMove } from '../ai/advisor';
+import { chooseMove, type Advice } from '../ai/advisor';
+import { requestAdvice } from '../ai/engine';
 import type { AiProfile } from '../ai/profiles';
 import { generateMoves } from '../engine/movegen';
 import type { Board, GameResult, Move, Side } from '../engine/types';
@@ -51,6 +52,8 @@ export interface MatchController {
     canUndo: boolean;
     isHumanTurn: boolean;
     onSquare: (index: number) => void;
+    /** Quita la selección actual sin mover (tecla Escape). */
+    clearSelection: () => void;
     playRemote: (move: Move) => void;
     adoptState: (board: Board, sideToMove: Side) => void;
     adoptSnapshot: (snapshot: MatchSnapshot) => void;
@@ -154,6 +157,44 @@ export const useMatch = (options: MatchOptions): MatchController => {
                 return;
             }
 
+            // Con movimiento reducido no se reproduce el recorrido paso a paso:
+            // la jugada se aplica de inmediato (el sonido y el estado sí cambian).
+            const reduceMotion =
+                typeof window !== 'undefined' &&
+                (document.documentElement.dataset.motion === 'reduce' ||
+                    (typeof window.matchMedia === 'function' &&
+                        window.matchMedia('(prefers-reduced-motion: reduce)')
+                            .matches));
+
+            if (reduceMotion) {
+                const next = advance(base, move);
+                historyRef.current = [...historyRef.current, base].slice(
+                    -HISTORY_LIMIT,
+                );
+
+                setSelection(null);
+                setAnimation(null);
+                setRunning(false);
+                setSnapshot(next);
+                playSound(
+                    move.promotion
+                        ? 'crown'
+                        : move.captures.length > 0
+                          ? 'capture'
+                          : 'move',
+                );
+
+                if (notify) {
+                    callbacksRef.current.onPlay?.(move, next);
+                }
+
+                if (next.result !== null) {
+                    callbacksRef.current.onFinish?.(next.result, next.plies);
+                }
+
+                return;
+            }
+
             const run = runRef.current;
             const steps = stepsOf(move);
             const captured: number[] = [];
@@ -244,12 +285,25 @@ export const useMatch = (options: MatchOptions): MatchController => {
             await nextPaint();
 
             const startedAt = performance.now();
-            const advice = chooseMove(
-                base.board,
-                base.sideToMove,
-                profile,
-                base.variant,
-            );
+            let advice: Advice;
+
+            try {
+                advice = await requestAdvice(
+                    base.board,
+                    base.sideToMove,
+                    profile.config,
+                    base.variant,
+                );
+            } catch {
+                // Sin worker (o si falló): se resuelve en el hilo principal.
+                advice = chooseMove(
+                    base.board,
+                    base.sideToMove,
+                    profile.config,
+                    base.variant,
+                );
+            }
+
             const elapsed = performance.now() - startedAt;
             const wait = Math.max(0, profile.config.minThinkMs - elapsed);
 
@@ -341,6 +395,12 @@ export const useMatch = (options: MatchOptions): MatchController => {
         },
         [canInteract, targets, selectable, runMove, snapshot],
     );
+
+    const clearSelection = useCallback(() => {
+        setSelection(null);
+        setMustAlert(false);
+        setRejected(null);
+    }, []);
 
     const playRemote = useCallback(
         (move: Move) => {
@@ -458,6 +518,7 @@ export const useMatch = (options: MatchOptions): MatchController => {
         canUndo: !remote && historyRef.current.length > 0,
         isHumanTurn,
         onSquare,
+        clearSelection,
         playRemote,
         adoptState,
         adoptSnapshot,

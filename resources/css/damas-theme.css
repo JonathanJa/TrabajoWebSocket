@@ -723,7 +723,7 @@
 .d-seg__item:hover {
     color: var(--tp-ink);
 }
-.d-seg__item[aria-selected='true'] {
+.d-seg__item[aria-pressed='true'] {
     background: var(--tp-acc);
     color: var(--tp-acc-ink);
 }
@@ -814,6 +814,7 @@
         320px 320px,
         420px 420px;
     opacity: 0.5;
+    animation: tp-drift 30s ease-in-out infinite;
 }
 .d-rings {
     position: absolute;
@@ -826,6 +827,50 @@
     );
     mask-image: radial-gradient(60% 50% at 50% 12%, #000 0%, transparent 78%);
     opacity: 0.35;
+    animation: d-rings-breathe 10s ease-in-out infinite;
+}
+/* Aurora de fondo: da profundidad al escenario sin tapar la interfaz. */
+.d-aurora {
+    position: absolute;
+    inset: -15%;
+    pointer-events: none;
+    background:
+        radial-gradient(
+            42% 34% at 18% 22%,
+            color-mix(in oklab, var(--tp-acc) 15%, transparent),
+            transparent 70%
+        ),
+        radial-gradient(
+            38% 32% at 82% 16%,
+            color-mix(in oklab, var(--tp-acc-2) 13%, transparent),
+            transparent 70%
+        ),
+        radial-gradient(
+            46% 36% at 52% 92%,
+            color-mix(in oklab, var(--tp-acc) 10%, transparent),
+            transparent 72%
+        );
+    opacity: 0.75;
+    animation: d-aurora-drift 28s ease-in-out infinite alternate;
+}
+@keyframes d-aurora-drift {
+    from {
+        transform: translate3d(-1.5%, -1%, 0) scale(1);
+    }
+    to {
+        transform: translate3d(2%, 1.5%, 0) scale(1.08);
+    }
+}
+@keyframes d-rings-breathe {
+    0%,
+    100% {
+        opacity: 0.24;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.4;
+        transform: scale(1.03);
+    }
 }
 .d-scan {
     position: absolute;
@@ -990,15 +1035,26 @@
     transition: transform var(--tp-dur) var(--tp-ease);
 }
 .d-disc--us {
-    background: var(--tp-ink);
+    background-color: var(--tp-ink);
+    background-image: radial-gradient(
+        circle at 34% 26%,
+        color-mix(in oklab, #fff 70%, var(--tp-ink)),
+        var(--tp-ink) 62%
+    );
     border-color: var(--tp-acc);
     color: var(--tp-bg);
     box-shadow: var(--tp-sh-sm);
 }
 .d-disc--them {
-    background: var(--tp-surf);
+    background-color: var(--tp-surf);
+    background-image: radial-gradient(
+        circle at 34% 26%,
+        color-mix(in oklab, var(--tp-ink) 20%, transparent),
+        transparent 58%
+    );
     border-color: var(--tp-acc-2);
     color: var(--tp-ink);
+    box-shadow: inset 0 -2px 5px rgba(0, 0, 0, 0.55);
 }
 .d-disc--king {
     border-width: calc(var(--tp-bw) * 2);
@@ -1007,11 +1063,20 @@
     width: 52%;
     height: 52%;
 }
-.d-sq:focus-visible,
 .d-btn:focus-visible,
 .d-seg__item:focus-visible {
     outline: var(--tp-bw) solid var(--tp-acc);
     outline-offset: 2px;
+}
+/* El tablero recorta su contenido: el foco va hacia adentro para no perderse. */
+.d-sq:focus-visible {
+    outline: 3px solid var(--tp-acc);
+    outline-offset: -3px;
+    z-index: 4;
+}
+.d-sq[aria-disabled='true'],
+.d-sq--dest[aria-disabled='true'] {
+    cursor: default;
 }
 .d-beams {
     position: absolute;
@@ -1025,6 +1090,169 @@
     fill: none;
     filter: drop-shadow(0 0 3px var(--tp-acc));
     animation: tp-fade var(--tp-dur-slow) var(--tp-ease) both;
+}
+
+/* ---------- Vista 3D: perspectiva, relieve y profundidad ---------- */
+.d-board--3d {
+    transform: perspective(1800px) rotateX(18deg);
+    transform-origin: 50% 52%;
+    border-color: color-mix(in oklab, var(--tp-acc) 30%, var(--tp-line));
+    box-shadow:
+        0 1px 0 color-mix(in oklab, var(--tp-acc) 26%, transparent),
+        0 6px 0 -2px color-mix(in oklab, var(--tp-bg) 72%, #000),
+        0 10px 0 -2px color-mix(in oklab, var(--tp-line) 60%, transparent),
+        0 22px 34px -12px rgba(0, 0, 0, 0.85),
+        0 0 70px -8px color-mix(in oklab, var(--tp-acc) 20%, transparent);
+}
+/* Luz superior + viñeta interior: la superficie se lee como una mesa.
+   Va sobre las casillas (que son opacas) y bajo las piezas. */
+.d-board--3d .d-pieces::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        linear-gradient(
+            180deg,
+            color-mix(in oklab, var(--tp-ink) 7%, transparent) 0%,
+            transparent 32%,
+            color-mix(in oklab, var(--tp-bg) 24%, transparent) 100%
+        ),
+        radial-gradient(
+            120% 90% at 50% 0%,
+            transparent 52%,
+            rgba(0, 0, 0, 0.3) 100%
+        );
+}
+/* Barrido holográfico sobre las piezas. */
+.d-board--3d::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 34%;
+    pointer-events: none;
+    background: linear-gradient(
+        180deg,
+        transparent 0%,
+        color-mix(in oklab, var(--tp-acc) 9%, transparent) 48%,
+        transparent 100%
+    );
+    opacity: 0.55;
+    animation: d-board-scan 9s linear infinite;
+}
+@keyframes d-board-scan {
+    from {
+        transform: translateY(-115%);
+    }
+    to {
+        transform: translateY(340%);
+    }
+}
+.d-board--3d .d-sq--field {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        inset 0 -2px 3px rgba(0, 0, 0, 0.34);
+}
+.d-board--3d .d-sq--void {
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45);
+}
+.d-board--3d .d-sq--sel::before {
+    inset: 4%;
+    box-shadow:
+        0 0 16px color-mix(in oklab, var(--tp-acc) 45%, transparent),
+        inset 0 0 14px color-mix(in oklab, var(--tp-acc) 22%, transparent);
+}
+.d-board--3d .d-sq--dest::after {
+    width: 32%;
+    height: 32%;
+    background: radial-gradient(
+        circle at 50% 38%,
+        var(--tp-ink),
+        var(--tp-acc) 38%,
+        color-mix(in oklab, var(--tp-acc) 45%, transparent) 72%,
+        transparent
+    );
+    box-shadow:
+        0 0 12px color-mix(in oklab, var(--tp-acc) 65%, transparent),
+        0 0 26px color-mix(in oklab, var(--tp-acc) 35%, transparent);
+    animation: d-dest-beat 1.6s ease-in-out infinite;
+}
+@keyframes d-dest-beat {
+    0%,
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.18);
+    }
+}
+.d-board--3d .d-disc {
+    inset: 10%;
+    background-image:
+        radial-gradient(
+            62% 62% at 32% 24%,
+            color-mix(in oklab, #fff 55%, transparent),
+            transparent 62%
+        ),
+        linear-gradient(
+            180deg,
+            color-mix(in oklab, #fff 12%, transparent),
+            transparent 58%
+        );
+    box-shadow:
+        inset 0 1px 0 color-mix(in oklab, #fff 52%, transparent),
+        inset 0 -3px 6px rgba(0, 0, 0, 0.45),
+        0 2px 0 var(--d-disc-side, #04100a),
+        0 4px 0 color-mix(in oklab, var(--d-disc-side, #04100a) 72%, #000),
+        0 7px 12px -3px rgba(0, 0, 0, 0.75);
+}
+/* Reflejo especular de la cara superior. */
+.d-board--3d .d-disc::before {
+    content: '';
+    position: absolute;
+    left: 18%;
+    right: 18%;
+    top: 8%;
+    height: 34%;
+    border-radius: 50%;
+    background: linear-gradient(
+        180deg,
+        color-mix(in oklab, #fff 48%, transparent),
+        transparent
+    );
+    opacity: 0.32;
+    pointer-events: none;
+}
+.d-disc--us {
+    --d-disc-side: color-mix(in oklab, var(--tp-acc) 34%, #04100a);
+}
+.d-disc--them {
+    --d-disc-side: #020806;
+}
+.d-board--3d .d-disc--us {
+    border-color: color-mix(in oklab, var(--tp-acc) 72%, var(--tp-ink));
+}
+.d-board--3d .d-disc--them {
+    border-color: color-mix(in oklab, var(--tp-acc-2) 60%, var(--tp-line));
+}
+.d-board--3d .d-disc--king {
+    border-width: calc(var(--tp-bw) * 2);
+}
+/* Aro interior de las damas: las distingue también de lejos. */
+.d-board--3d .d-disc--king::after {
+    content: '';
+    position: absolute;
+    inset: 6%;
+    border-radius: inherit;
+    border: 1px solid color-mix(in oklab, var(--tp-acc) 62%, transparent);
+    box-shadow: inset 0 0 10px
+        color-mix(in oklab, var(--tp-acc) 22%, transparent);
+    pointer-events: none;
+}
+.d-board--3d .d-disc__mark {
+    filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.45));
 }
 
 /* ---------- Overlay / log ---------- */
@@ -1310,6 +1538,10 @@
     .d-board {
         max-width: min(100%, 78vh);
         margin: 0 auto;
+    }
+    /* En vertical la inclinación se suaviza: manda la legibilidad táctil. */
+    .d-board--3d {
+        transform: perspective(1100px) rotateX(13deg);
     }
     .d-side {
         padding: 9px 10px;
@@ -1623,6 +1855,9 @@
     .d-arena__score .d-plate__label {
         display: none;
     }
+    .d-board--3d {
+        transform: perspective(1400px) rotateX(11deg);
+    }
     .d-arena__score .d-score__value {
         font-size: 20px;
     }
@@ -1649,4 +1884,551 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
+}
+
+/* ---------- Accesibilidad ---------- */
+
+/* Utilidad para texto solo visible por lectores de pantalla. */
+.sr-only {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+/* Enlace de salto: aparece al recibir foco con Tab. */
+.d-skip {
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top));
+    left: calc(8px + env(safe-area-inset-left));
+    z-index: 200;
+    transform: translateY(-180%);
+    padding: 12px 18px;
+    border-radius: var(--tp-r-btn);
+    background: var(--tp-acc);
+    color: var(--tp-acc-ink);
+    font-family: var(--tp-font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    transition: transform var(--tp-dur) var(--tp-ease);
+}
+.d-skip:focus {
+    transform: translateY(0);
+    outline: 2px solid var(--tp-ink);
+    outline-offset: 2px;
+}
+
+.d-main:focus,
+.d-head__title:focus {
+    outline: none;
+}
+
+.d-result:focus {
+    outline: 2px dashed var(--tp-acc);
+    outline-offset: 4px;
+}
+
+.d-chat-log:focus-visible,
+.d-log:focus-visible {
+    outline: 2px solid var(--tp-acc);
+    outline-offset: 2px;
+}
+
+/* Panel de preferencias: diálogo nativo (foco atrapado por el navegador). */
+.d-dialog {
+    width: min(540px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    padding: 0;
+    border: var(--tp-bw) solid var(--tp-line);
+    border-radius: var(--tp-r);
+    background: var(--tp-surf);
+    color: var(--tp-ink);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.72);
+}
+.d-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.74);
+}
+.d-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
+}
+.d-a11y__opt {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    border: var(--tp-bw) solid var(--tp-line);
+    border-radius: var(--tp-r-sm);
+    background: var(--tp-surf-2);
+    cursor: pointer;
+}
+.d-a11y__opt:hover {
+    border-color: var(--tp-acc);
+}
+.d-a11y__opt:focus-within {
+    outline: 2px solid var(--tp-acc);
+    outline-offset: 2px;
+}
+.d-a11y__opt input {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin: 1px 0 0;
+    accent-color: var(--tp-acc);
+}
+.d-a11y__opt > span {
+    min-width: 0;
+}
+.d-a11y__opt b {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--tp-acc);
+    font-family: var(--tp-font-mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+.d-a11y__opt > span > span {
+    display: block;
+    font-size: 13px;
+    line-height: 1.45;
+}
+.d-a11y__help {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 12px;
+    border: var(--tp-bw) dashed var(--tp-line);
+    border-radius: var(--tp-r-sm);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+/* Movimiento reducido elegido desde la app (además de la preferencia del SO). */
+html[data-motion='reduce'] *,
+html[data-motion='reduce'] *::before,
+html[data-motion='reduce'] *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+}
+html[data-motion='reduce'] .d-scan {
+    display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .d-scan {
+        display: none;
+    }
+}
+
+/* Alto contraste: tokens reforzados y piezas con diferencia de luminancia. */
+html[data-contrast='high'] {
+    --tp-bw: 2px;
+    --tp-bg: #000;
+    --tp-canvas: #000;
+    --tp-surf: #07120b;
+    --tp-surf-2: #17251b;
+    --tp-ink: #fff;
+    --tp-mute: #d7ead9;
+    --tp-line: #9fe3b2;
+    --tp-acc: #d7ff8a;
+    --tp-acc-2: #8fe9ff;
+    --tp-acc-ink: #001006;
+}
+html[data-contrast='high'] .d-sq--field {
+    background: #0e1a12;
+    box-shadow: inset 0 0 0 1px #2c4735;
+}
+html[data-contrast='high'] .d-board--light-squares .d-sq--field {
+    background: #45684f;
+}
+html[data-contrast='high'] .d-board--all-squares .d-sq--field:nth-child(odd) {
+    background: #45684f;
+}
+html[data-contrast='high'] .d-board--all-squares .d-sq--field:nth-child(even) {
+    background: #0e1a12;
+}
+html[data-contrast='high'] .d-sq--void {
+    background: #000;
+}
+html[data-contrast='high'] .d-disc--us {
+    background: #fff;
+    background-image: none;
+    border-color: #000;
+    color: #000;
+}
+html[data-contrast='high'] .d-disc--them {
+    background: #061009;
+    background-image: none;
+    border-color: #fff;
+    color: #fff;
+}
+html[data-contrast='high'] .d-disc--king {
+    border-width: 4px;
+}
+html[data-contrast='high'] .d-board--3d .d-disc--us,
+html[data-contrast='high'] .d-board--3d .d-disc--them {
+    background-image: none;
+}
+html[data-contrast='high'] .d-side__disc--us {
+    background: #fff;
+    border-color: #fff;
+}
+html[data-contrast='high'] .d-side__disc--them {
+    background: #000;
+    border-color: #fff;
+}
+
+/* Destinos legales como botones grandes: útiles con teclado, switch o temblor. */
+.d-moves {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.d-moves__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.d-move {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 52px;
+    min-height: 44px;
+    padding: 6px 10px;
+    border: var(--tp-bw) solid var(--tp-line);
+    border-radius: var(--tp-r-sm);
+    background: var(--tp-surf-2);
+    color: var(--tp-ink);
+    font-family: var(--tp-font-mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+}
+.d-move span {
+    color: var(--tp-acc);
+}
+.d-move:hover {
+    border-color: var(--tp-acc);
+}
+.d-move:focus-visible {
+    outline: 2px solid var(--tp-acc);
+    outline-offset: 2px;
+}
+
+/* En apaisado compacto se agrandan los mandos táctiles sin perder el tablero. */
+@media (orientation: landscape) and (max-height: 560px) {
+    .d-arena__controls .d-btn,
+    .d-arena__controls .d-btn--icon {
+        min-height: 36px;
+    }
+    .d-arena__controls .d-btn--icon {
+        width: 36px;
+        height: 36px;
+    }
+}
+
+/* ---------- Ranking global (base de datos) ---------- */
+.d-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    border: var(--tp-bw) solid var(--tp-line);
+    border-radius: var(--tp-r-sm);
+    background: color-mix(in oklab, var(--tp-surf-2) 55%, transparent);
+}
+.d-table-wrap:focus-visible {
+    outline: 2px solid var(--tp-acc);
+    outline-offset: 3px;
+}
+.d-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--tp-font-mono);
+    font-size: 12px;
+    color: var(--tp-mute);
+}
+.d-table th,
+.d-table td {
+    padding: 9px 8px;
+    border-bottom: var(--tp-bw) dashed
+        color-mix(in oklab, var(--tp-line) 55%, transparent);
+    text-align: left;
+    white-space: nowrap;
+}
+.d-table thead th {
+    color: var(--tp-mute);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+.d-table tbody tr:last-child th,
+.d-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+.d-table tbody tr:hover {
+    background: color-mix(in oklab, var(--tp-acc) 7%, transparent);
+}
+.d-table__pos {
+    width: 32px;
+    color: var(--tp-mute);
+}
+.d-table__name {
+    color: var(--tp-ink);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.d-table__points {
+    color: var(--tp-acc);
+    font-family: var(--tp-font-display);
+    font-size: 14px;
+}
+.d-table__date,
+.d-table__tally {
+    color: var(--tp-mute);
+}
+.d-table--compact th,
+.d-table--compact td {
+    padding: 7px 5px;
+}
+.d-table--compact .d-table__name {
+    font-size: 11px;
+}
+.d-table--compact .d-table__points {
+    font-size: 12px;
+}
+.d-ranking-home {
+    align-items: start;
+}
+.d-ranking-home .d-table-wrap {
+    max-width: 100%;
+}
+@media (min-width: 900px) {
+    .d-grid--split.d-local-names {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* ---------- Damas chinas: estrella de 121 huecos ---------- */
+.d-chinese__stage {
+    position: relative;
+    width: 100%;
+    max-width: 620px;
+    margin: 0 auto;
+    aspect-ratio: 13.8 / 15.656;
+    user-select: none;
+    touch-action: manipulation;
+}
+.d-chinese__bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+.d-chinese__star {
+    fill: color-mix(in oklab, var(--tp-surf-2) 86%, var(--tp-bg));
+    stroke: color-mix(in oklab, var(--tp-line) 80%, transparent);
+    stroke-width: 0.045;
+    filter: drop-shadow(
+        0 14px 26px color-mix(in oklab, var(--tp-bg) 75%, transparent)
+    );
+}
+.d-chinese__socket {
+    fill: var(--tp-bg);
+    stroke: color-mix(in oklab, var(--tp-line) 70%, transparent);
+    stroke-width: 0.035;
+}
+.d-chinese__hole {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    width: 6.2%;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--tp-ink);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    -webkit-tap-highlight-color: transparent;
+}
+.d-chinese__hole:focus-visible {
+    outline: 2px solid var(--tp-acc-2);
+    outline-offset: 3px;
+}
+.d-chinese__hole[aria-disabled='true'] {
+    cursor: default;
+}
+.d-chinese__marble {
+    position: relative;
+    z-index: 1;
+    width: 78%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    border: var(--tp-bw) solid
+        color-mix(in oklab, var(--tp-ink) 55%, transparent);
+    box-shadow:
+        inset 0 2px 3px color-mix(in oklab, var(--tp-ink) 45%, transparent),
+        inset 0 -3px 5px color-mix(in oklab, var(--tp-bg) 55%, transparent),
+        0 3px 5px color-mix(in oklab, var(--tp-bg) 70%, transparent);
+}
+.d-chinese__marble--claro {
+    background: radial-gradient(
+        circle at 35% 28%,
+        #fff 0%,
+        #e8f3d6 38%,
+        #b8c9a2 72%,
+        #7e9069 100%
+    );
+    border-color: #f4ffe8;
+}
+.d-chinese__marble--oscuro {
+    background: radial-gradient(
+        circle at 35% 28%,
+        #718a78 0%,
+        #334a3a 42%,
+        #16251b 76%,
+        #07110b 100%
+    );
+    border-color: color-mix(in oklab, var(--tp-acc-2) 55%, #fff);
+}
+.d-chinese__hole--selected .d-chinese__marble {
+    box-shadow:
+        0 0 0 2px var(--tp-acc),
+        0 0 18px color-mix(in oklab, var(--tp-acc) 65%, transparent);
+}
+.d-chinese__hole--last .d-chinese__marble {
+    outline: 2px solid var(--tp-acc-2);
+    outline-offset: 1px;
+}
+.d-chinese__target {
+    position: absolute;
+    z-index: 2;
+    width: 34%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: var(--tp-acc);
+    box-shadow: 0 0 10px color-mix(in oklab, var(--tp-acc) 85%, transparent);
+    animation: tp-breathe 1.2s ease-in-out infinite;
+    pointer-events: none;
+}
+.d-chinese__destinations {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.d-chinese__rules,
+.d-chinese__steps {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+    color: var(--tp-mute);
+    font-size: 13px;
+    line-height: 1.55;
+}
+.d-chinese__rules li,
+.d-chinese__steps li {
+    position: relative;
+    padding-left: 20px;
+}
+.d-chinese__rules li::before,
+.d-chinese__steps li::before {
+    position: absolute;
+    left: 0;
+    color: var(--tp-acc);
+    font-family: var(--tp-font-mono);
+}
+.d-chinese__rules li::before {
+    content: '▸';
+}
+.d-chinese__steps {
+    counter-reset: chinese-step;
+}
+.d-chinese__steps li {
+    counter-increment: chinese-step;
+}
+.d-chinese__steps li::before {
+    content: counter(chinese-step) '.';
+}
+.d-chinese__steps b {
+    color: var(--tp-ink);
+}
+.d-chinese__log {
+    list-style: none;
+    display: grid;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    font-family: var(--tp-font-mono);
+    font-size: 12px;
+    color: var(--tp-mute);
+}
+.d-chinese__log li {
+    padding: 3px 0;
+    border-bottom: var(--tp-bw) dashed
+        color-mix(in oklab, var(--tp-line) 50%, transparent);
+    overflow-wrap: anywhere;
+}
+.d-chinese__log li:last-child {
+    border-bottom: 0;
+}
+.d-chinese__log b {
+    color: var(--tp-ink);
+}
+.d-chinese__players .d-plate {
+    min-width: 0;
+}
+@media (min-width: 900px) {
+    .d-grid--split.d-chinese__players {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 899px) {
+    .d-chinese__stage {
+        max-width: min(100%, 72vh);
+    }
+}
+@media (max-width: 899px) and (orientation: portrait) {
+    .d-chinese__stage {
+        width: calc(100% + 26px);
+        max-width: none;
+        margin-inline: -13px;
+    }
+}
+html[data-contrast='high'] .d-chinese__marble--claro {
+    background: #fff;
+    background-image: none;
+    border-color: #000;
+}
+html[data-contrast='high'] .d-chinese__marble--oscuro {
+    background: #000;
+    background-image: none;
+    border-color: #fff;
+}
+html[data-contrast='high'] .d-chinese__target {
+    background: var(--tp-acc);
+    box-shadow:
+        0 0 0 2px #000,
+        0 0 10px var(--tp-acc);
 }
